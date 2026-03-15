@@ -25,16 +25,16 @@ Model_t = T.TypeVar("Model_t", bound=nnx.Module)
 
 
 class DataStrengthenConfig(T.NamedTuple):
-    max_noise: float = 0.01
-    salt_noise_prob: float = 0.01
-    flip_prob: float = 0.5
-    mixup_weight: float = 0.01
-    transmix_weight: float = 0.2
+    max_noise: float
+    salt_noise_prob: float
+    flip_prob: float
+    mixup_weight: float
+    transmix_weight: float
 
-    crop_width: int = 4
-    crop_height: int = 4
+    max_crop_width: int
+    max_crop_height: int
 
-    max_size: int = 38
+    max_scale_size: int
 
 
 A = T.TypeVar("A")
@@ -139,10 +139,12 @@ def ApplyStrengthen(x: jax.Array, strengthen_config: DataStrengthenConfig, rngs:
         x = AddNoise(x, strengthen_config.max_noise, rngs)
     if strengthen_config.flip_prob > 0:
         x = RandomHorizenFlip(x, strengthen_config.flip_prob, rngs)
-    if strengthen_config.max_size > 1.0:
-        x = ScaleImagesDown(x, strengthen_config.max_size, rngs)
-    if strengthen_config.crop_width > 0 or strengthen_config.crop_height > 0:
-        x = RandomShiftImage(x, strengthen_config.crop_width, strengthen_config.crop_height, rngs)
+    if strengthen_config.max_scale_size > 1.0:
+        x = ScaleImagesDown(x, strengthen_config.max_scale_size, rngs)
+    if strengthen_config.max_crop_width > 0 or strengthen_config.max_crop_height > 0:
+        x = RandomShiftImage(
+            x, strengthen_config.max_crop_width, strengthen_config.max_crop_height, rngs
+        )
     if strengthen_config.salt_noise_prob > 0:
         x = AddSaltNoise(x, strengthen_config.salt_noise_prob, rngs)
     return x
@@ -464,7 +466,14 @@ def main(_):
                 config.model_save_dir, f"{time.time()}.{config.model_suffix}"
             ),
             strengthen_config=DataStrengthenConfig(
-                max_noise=config.max_train_noise, flip_prob=config.flip_prob
+                max_noise=config.max_noise,
+                salt_noise_prob=config.salt_noise_prob,
+                flip_prob=config.flip_prob,
+                mixup_weight=config.mixup_weight,
+                transmix_weight=config.transmix_weight,
+                max_crop_width=config.max_crop_width,
+                max_crop_height=config.max_crop_height,
+                max_scale_size=config.max_scale_size,
             ),
         )
     else:

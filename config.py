@@ -10,7 +10,7 @@ def get_config():
     config.use_training_model = False
     config.train_state_path = "./cache/latest.trainstate"
 
-    config.model_features = 64
+    config.model_features = 128
     config.num_heads = 2
     config.num_encoders = 8
 
@@ -27,12 +27,14 @@ def get_config():
 
     config.use_graphic = True
 
-    config.max_train_noise = 0.02
+    config.max_noise = 0.02
+    config.salt_noise_prob = 0.01
     config.flip_prob = 0.5
-
-    config.mixup_weight = 0.0001
-    config.mixup_epoch_begin = 10
-    config.mixup_epoch_end = 60
+    config.mixup_weight = 0.2
+    config.transmix_weight = 0.2
+    config.max_crop_width = 4
+    config.max_crop_height = 4
+    config.max_scale_size = 38
 
     config.eval_per_epoch = 1
 

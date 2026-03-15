@@ -151,7 +151,11 @@ class CIFAR10Model(nnx.Module):
             nnx.LayerNorm(model_features, rngs=rngs),
             nnx.Linear(model_features, model_features * 4, rngs=rngs),
             nnx.gelu,
+            nnx.LayerNorm(model_features * 4, rngs=rngs),
             nnx.Dropout(mlp_dropout_rate, rngs=rngs),
+            nnx.Linear(model_features * 4, model_features * 4, rngs=rngs),
+            nnx.gelu,
+            nnx.LayerNorm(model_features * 4, rngs=rngs),
             nnx.Linear(model_features * 4, 10, rngs=rngs),
         ])
 
