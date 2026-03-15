@@ -365,7 +365,15 @@ def TestModel(model: nnx.Module, x: jax.Array, y: jax.Array, batch_size: int):
 
 
 def BatchDatas(xs: T.Sequence[jax.Array], batch_size: int):
-    return [x.reshape(x.shape[0] // batch_size, batch_size, *x.shape[1:]) for x in xs]
+    dataset_size = xs[0].shape[0]
+    batch_count = dataset_size // batch_size
+    if dataset_size % batch_size != 0:
+        print(
+            f"Warning: dataset size {dataset_size} % batch size {batch_size} != 0, {dataset_size % batch_size} data will not be trained"
+        )
+    return [
+        x[: batch_count * batch_size].reshape(batch_count, batch_size, *x.shape[1:]) for x in xs
+    ]
 
 
 def CountModuleParams(module: nnx.Module):
