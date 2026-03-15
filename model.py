@@ -118,11 +118,12 @@ class CIFAR10Model(nnx.Module):
         rngs: nnx.Rngs,
     ):
         self.cnn = Sequential([
-            nnx.Conv(3, 32, (4, 4), strides=(2, 2), rngs=rngs),
+            nnx.Conv(3, model_features, (3, 3), padding="SAME", rngs=rngs),
             nnx.leaky_relu,
-            nnx.LayerNorm(32, rngs=rngs),
-            nnx.Conv(32, model_features, (4, 4), strides=(2, 2), rngs=rngs),
-            nnx.leaky_relu,
+            nnx.LayerNorm(model_features, rngs=rngs),
+            nnx.Conv(
+                model_features, model_features, (4, 4), strides=(4, 4), padding="SAME", rngs=rngs
+            ),
             nnx.LayerNorm(model_features, rngs=rngs),
             lambda x: x.reshape(x.shape[0], -1, model_features),
             nnx.Dropout(0.4, rngs=rngs),
