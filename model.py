@@ -108,6 +108,31 @@ class TransformerBlock(nnx.Module):
         return x + self.fnn_dropout(y)
 
 
+class PreCNN(nnx.Module):
+    def __init__(self, model_features: int, rngs: nnx.Rngs):
+        self.cnn = Sequential([
+            nnx.Conv(3, model_features, (9, 9), padding="VALID", rngs=rngs),
+            nnx.leaky_relu,
+            nnx.LayerNorm(model_features, rngs=rngs),
+        ])
+        _, width, height, channels = nnx.eval_shape(
+            lambda m, x: m(x), self.cnn, jnp.zeros((1, 32, 32, 3))
+        ).shape
+        self.weight_pool = nnx.Param(
+            jax.random.uniform(rngs.params(), ((width // 2) * (height // 2),))
+        )
+        self.norm = nnx.LayerNorm(channels, rngs=rngs)
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        x = self.cnn(x)
+        batch_size, _, _, channels = x.shape
+        x = x.reshape(batch_size, -1, 4, channels)
+        x = jnp.einsum("bsnc,s->bsc", x, self.weight_pool) / 4
+        x = x.reshape(batch_size, -1, channels)
+        x = self.norm(x)
+        return x
+
+
 class CIFAR10Model(nnx.Module):
     def __init__(
         self,
@@ -118,10 +143,7 @@ class CIFAR10Model(nnx.Module):
         rngs: nnx.Rngs,
     ):
         self.cnn = Sequential([
-            nnx.Conv(3, model_features, (9, 9), padding="VALID", rngs=rngs),
-            nnx.leaky_relu,
-            nnx.LayerNorm(model_features, rngs=rngs),
-            lambda x: x.reshape(x.shape[0], -1, model_features),
+            PreCNN(model_features, rngs),
             nnx.Dropout(0.4, rngs=rngs),
         ])
 
