@@ -164,6 +164,7 @@ class CIFAR10Model(nnx.Module):
             x = encoder(x)
 
         x = jnp.einsum("bsf,sf->bf", x, self.features_weights)
+        x = x / jnp.sum(self.features_weights[...], axis=0)[None, :]
         x = self.features_weights_norm(x)
 
         return self.target_logits_mlp(x)
