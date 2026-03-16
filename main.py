@@ -1,12 +1,13 @@
 from model import CIFAR10Model
 
-import cifar10_loader
-
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 import optax
 import typing as T
+
+import cifar10_loader
+from data_strengthen import DataStrengthenConfig, ApplyStrengthen, Mixup
 
 from dashboard import Dashboard
 import time_util
@@ -24,144 +25,13 @@ import matplotlib.pyplot as plt
 Model_t = T.TypeVar("Model_t", bound=nnx.Module)
 
 
-class DataStrengthenConfig(T.NamedTuple):
-    max_noise: float
-    salt_noise_prob: float
-    flip_prob: float
-    mixup_weight: float
-    transmix_weight: float
-
-    max_crop_width: int
-    max_crop_height: int
-
-    max_scale_size: int
-
-
-A = T.TypeVar("A")
-
-
-def CondApply(cond: bool, true_fn: T.Callable[[A], A], x: A) -> A:
-    return nnx.cond(cond, lambda x: true_fn(x), lambda x: x, x)
-
-
-@jax.jit
-def AddNoise(x: jax.Array, max_noise: float, rngs: nnx.Rngs):
-    noise = jax.random.uniform(rngs.params(), x.shape, minval=0.0, maxval=max_noise)
-    x = x + noise
-    x = jnp.where(x > 1.0, 1.0, x)
-    x = jnp.where(x < 0.0, 0.0, x)
-    return x
-
-
-@jax.jit
-def AddSaltNoise(x: jax.Array, salt_prob: float, rngs: nnx.Rngs):
-    salt_mask = jax.random.bernoulli(rngs.params(), salt_prob, x.shape)
-    return jnp.where(salt_mask, 1.0, x)
-
-
-@jax.jit
-def RandomHorizenFlip(x: jax.Array, flip_prob: float, rngs: nnx.Rngs):
-    flip_mask = jax.random.bernoulli(rngs.params(), flip_prob, (x.shape[0],))
-    flipped_x = jnp.where(flip_mask[:, None, None, None], x[:, :, ::-1, :], x)
-    return flipped_x
-
-
-@jax.jit
-def ScaleImageDown(image: jax.Array, target_size: int):
-    height, width, channels = image.shape
-
-    scale_factor = target_size / height
-
-    return jax.image.scale_and_translate(
-        image,
-        shape=(height, width, channels),
-        spatial_dims=(0, 1),
-        scale=jnp.array([scale_factor, scale_factor]),
-        translation=jnp.array([0.0, 0.0]),
-        method=jax.image.ResizeMethod.LINEAR,
-        antialias=True,
-    )
-
-
-@jax.jit
-def ScaleImagesDown(images: jax.Array, max_size: float, rngs: nnx.Rngs):
-    batch_size, height, width, channels = images.shape
-
-    random_sizes = jax.random.randint(
-        rngs.params(), (batch_size,), minval=height, maxval=jnp.array(max_size, dtype=jnp.int32) + 1
-    )
-
-    return jax.vmap(ScaleImageDown)(images, random_sizes)
-
-
-@jax.jit
-def ShiftImage(image: jax.Array, horizen_shift: int, vertical_shift: int) -> jax.Array:
-    h, w, c = image.shape
-    max_horizen_shift = w // 2
-    max_vertical_shift = h // 2
-    padded = jnp.pad(
-        image,
-        (
-            (max_vertical_shift, max_vertical_shift),
-            (max_horizen_shift, max_horizen_shift),
-            (0, 0),
-        ),
-        mode="edge",
-    )
-    start_h = max_vertical_shift - vertical_shift
-    start_w = max_horizen_shift - horizen_shift
-    return jax.lax.dynamic_slice(padded, (start_h, start_w, 0), (h, w, c))
-
-
-@jax.jit
-def RandomShiftSingleImage(
-    image: jax.Array, max_horizen_shift: int, max_vertical_shift: int, random_key: jax.Array
-) -> jax.Array:
-    horizen_shift = jax.random.randint(random_key, (), -max_horizen_shift, max_horizen_shift)
-    vertical_shift = jax.random.randint(random_key, (), -max_vertical_shift, max_vertical_shift)
-    return ShiftImage(image, horizen_shift, vertical_shift)
-
-
-@jax.jit
-def RandomShiftImage(
-    x: jax.Array, max_horizen_shift: int, max_vertical_shift: int, rngs: nnx.Rngs
-) -> jax.Array:
-    batch_size = x.shape[0]
-    random_keys = jax.random.split(rngs.params(), batch_size)
-    return jax.vmap(RandomShiftSingleImage, in_axes=(0, None, None, 0))(
-        x, max_horizen_shift, max_vertical_shift, random_keys
-    )
-
-
-@jax.jit(static_argnames=["strengthen_config"])
-def ApplyStrengthen(x: jax.Array, strengthen_config: DataStrengthenConfig, rngs: nnx.Rngs):
-    if strengthen_config.max_noise > 0:
-        x = AddNoise(x, strengthen_config.max_noise, rngs)
-    if strengthen_config.flip_prob > 0:
-        x = RandomHorizenFlip(x, strengthen_config.flip_prob, rngs)
-    if strengthen_config.max_scale_size > 1.0:
-        x = ScaleImagesDown(x, strengthen_config.max_scale_size, rngs)
-    if strengthen_config.max_crop_width > 0 or strengthen_config.max_crop_height > 0:
-        x = RandomShiftImage(
-            x, strengthen_config.max_crop_width, strengthen_config.max_crop_height, rngs
-        )
-    if strengthen_config.salt_noise_prob > 0:
-        x = AddSaltNoise(x, strengthen_config.salt_noise_prob, rngs)
-    return x
-
-
-@nnx.jit(static_argnames=["strengthen_config"])
+@nnx.jit
 def TrainBatch(
     model_optimizer: tuple[Model_t, nnx.Optimizer[Model_t]],
     x: jax.Array,
     y: jax.Array,
-    random_key: jax.Array,
-    strengthen_config: T.Optional[DataStrengthenConfig] = None,
 ):
     model, optimzier = model_optimizer
-
-    if strengthen_config is not None:
-        x = ApplyStrengthen(x, strengthen_config, nnx.Rngs(random_key))
 
     def loss_fn(model: Model_t):
         logits = model(x)
@@ -178,88 +48,48 @@ def TrainBatch(
     return (model, optimzier), loss, accuracy
 
 
-@nnx.jit(static_argnames=["batch_size", "strengthen_config"])
+@nnx.jit(static_argnames=["batch_size", "strengthen_config", "mixer"])
 def TrainModel(
     model: Model_t,
     optimizer: nnx.Optimizer[Model_t],
     x: jax.Array,
     y: jax.Array,
     batch_size: int,
+    *,
     rngs: nnx.Rngs,
     metrics: nnx.Metric,
-    strengthen_config: T.Optional[DataStrengthenConfig] = None,
+    strengthen_config: DataStrengthenConfig,
+    mixer: T.Optional[
+        T.Callable[
+            [tuple[jax.Array, jax.Array], nnx.Rngs, DataStrengthenConfig],
+            tuple[jax.Array, jax.Array],
+        ]
+    ] = None,
 ):
+
     indices = jnp.arange(x.shape[0])
     indices = jax.random.permutation(rngs.params(), indices)
-    x, y = BatchDatas((x[indices], y[indices]), batch_size)
+    x, y = x[indices], y[indices]  # Shuffle
 
-    random_keys = jax.random.split(rngs.params(), x.shape[0])
+    x = ApplyStrengthen(x, strengthen_config, rngs)
 
-    @nnx.scan(in_axes=(nnx.Carry, 0, 0, 0), out_axes=(nnx.Carry, 0, 0))
-    def TrainBatchScan(carry, x, y, random_key):
-        return TrainBatch(carry, x, y, random_key, strengthen_config)
+    if mixer is not None:
+        x, y = mixer(
+            (
+                x.reshape(2, x.shape[0] // 2, *x.shape[1:]),
+                y.reshape(2, y.shape[0] // 2, *y.shape[1:]),
+            ),
+            rngs,
+            strengthen_config,
+        )
 
-    _, losses, accuracies = TrainBatchScan((model, optimizer), x, y, random_keys)
+    x, y = BatchDatas((x, y), batch_size)
 
-    metrics.update(values=losses, accuracy=accuracies)
-
-
-# @param mixer: (([x1,x2],[y1,y2]),random_key)->(mixed_x,mixed_y)
-@nnx.jit(static_argnames=["batch_size", "mixer", "strengthen_config"])
-def TrainModelWithMixup(
-    model: Model_t,
-    optimizer: nnx.Optimizer[Model_t],
-    x: jax.Array,
-    y: jax.Array,
-    batch_size: int,
-    mixer: T.Callable[
-        [tuple[jax.Array, jax.Array], jax.Array, T.Optional[DataStrengthenConfig]],
-        tuple[jax.Array, jax.Array],
-    ],
-    rngs: nnx.Rngs,
-    metrics: nnx.Metric,
-    strengthen_config: T.Optional[DataStrengthenConfig] = None,
-):
-    indices = jnp.arange(x.shape[0])
-    indices = jax.random.permutation(rngs.params(), indices)
-    x, y = BatchDatas((x[indices], y[indices]), batch_size)
-    batch_count, batch_size, width, height, channels = x.shape
-
-    x = x.reshape(batch_count // 2, 2, batch_size, width, height, channels)
-    y = y.reshape(batch_count // 2, 2, batch_size)
-
-    random_keys = jax.random.split(rngs.params(), x.shape[0])
-
-    @nnx.scan(in_axes=(nnx.Carry, 0, 0, 0), out_axes=(nnx.Carry, 0, 0))
-    def TrainBatchScan(carry, x, y, random_key):
-        subkey, random_key = jax.random.split(random_key)
-        x, y = mixer((x, y), subkey, strengthen_config)
-        return TrainBatch(carry, x, y, random_key, strengthen_config)
-
-    _, losses, accuracies = TrainBatchScan((model, optimizer), x, y, random_keys)
+    _, losses, accuracies = nnx.scan(
+        TrainBatch, in_axes=(nnx.Carry, 0, 0), out_axes=(nnx.Carry, 0, 0)
+    )((model, optimizer), x, y)
 
     metrics.update(values=losses, accuracy=accuracies)
-
-
-@nnx.jit(static_argnames=["strengthen_config"])
-def TransMix(
-    xy: tuple[jax.Array, jax.Array],
-    random_key: jax.Array,
-    strengthen_config: T.Optional[DataStrengthenConfig] = None,
-):
-    # xy.x: (2, batch_size, weight, height, channels)
-    # x1.shape: (batch_size, weight, height, channels)
-    # xy.y: (2, batch_size)
-    # y1.shape: (batch_size,)
-    (x1, x2), (y1, y2) = xy
-    weight = strengthen_config.transmix_weight if strengthen_config is not None else 0.2
-    random_key, subkey = jax.random.split(random_key)
-    weight = jax.random.beta(subkey, weight, weight)
-    mask = jax.random.bernoulli(random_key, 1 - weight, x1.shape)
-
-    x_mixed = jnp.where(mask, x1, x2)
-    y_mixed = nnx.one_hot(y1, 10) * (1 - weight) + nnx.one_hot(y2, 10) * weight
-    return x_mixed, y_mixed
 
 
 def Train(
@@ -280,7 +110,7 @@ def Train(
     use_graphic: bool = True,
     dashboard_block: bool = False,
     eval_per_epoch: int = 1,
-    strengthen_config: T.Optional[DataStrengthenConfig] = None,
+    strengthen_config: DataStrengthenConfig,
 ):
     train_metrics = nnx.MultiMetric(
         loss=nnx.metrics.Average(), accuracy=nnx.metrics.Average("accuracy")
@@ -301,7 +131,7 @@ def Train(
     else:
         dashboard = None
 
-    trainer = time_util.CountPerformance(TrainModelWithMixup)
+    trainer = time_util.CountPerformance(TrainModel)
 
     for epoch in range(epoch_count):
         _, timecost = trainer(
@@ -310,10 +140,10 @@ def Train(
             x,
             y,
             batch_size,
-            TransMix,
-            rngs,
-            train_metrics,
-            strengthen_config,
+            rngs=rngs,
+            metrics=train_metrics,
+            strengthen_config=strengthen_config,
+            mixer=Mixup,
         )
 
         epoch_metrics = train_metrics.compute()
@@ -479,7 +309,6 @@ def main(_):
                 salt_noise_prob=config.salt_noise_prob,
                 flip_prob=config.flip_prob,
                 mixup_weight=config.mixup_weight,
-                transmix_weight=config.transmix_weight,
                 max_crop_width=config.max_crop_width,
                 max_crop_height=config.max_crop_height,
                 max_scale_size=config.max_scale_size,
