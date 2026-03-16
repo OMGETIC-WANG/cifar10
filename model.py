@@ -107,6 +107,17 @@ class TransformerBlock(nnx.Module):
         y = self.fnn(self.pre_fnn_norm(x))
         return x + self.fnn_dropout(y)
 
+    def CalcClsToken(self, x: jax.Array, cls_token_index: int = -1):
+        batch_size = x.shape[0]
+        cls_tokens = x[:, cls_token_index, :]
+        pre_attention_normed = self.pre_attention_norm(x)
+        cls_tokens = cls_tokens + self.attention(
+            pre_attention_normed[:, cls_token_index, :][:, None, :],
+            pre_attention_normed,
+            pre_attention_normed,
+        ).reshape(batch_size, -1)
+        return cls_tokens + self.fnn_dropout(self.fnn(self.pre_fnn_norm(cls_tokens)))
+
 
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
@@ -189,7 +200,8 @@ class CIFAR10Model(nnx.Module):
             [jnp.full((batch_size, 1, self.model_features), self.cls_token[...]), x], axis=1
         )
 
-        for encoder in self.encoders:
+        for encoder in self.encoders[:-1]:
             x = encoder(x)
+        x = self.encoders[-1].CalcClsToken(x)
 
-        return self.target_logits_mlp(x[jnp.arange(batch_size), 0])
+        return self.target_logits_mlp(x)
