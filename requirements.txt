@@ -1,0 +1,9 @@
+absl-py==2.4.0
+flax==0.12.5
+jax==0.9.1
+jaxlib==0.9.1
+kagglehub==1.0.0
+matplotlib==3.10.8
+ml-collections==1.1.0
+numpy==2.4.3
+optax==0.2.6
