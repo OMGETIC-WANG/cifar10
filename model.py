@@ -145,13 +145,9 @@ class CIFAR10Model(nnx.Module):
         )
 
         _, seqlen, _ = nnx.eval_shape(lambda m, x: m(x), self.cnn, jnp.zeros(input_shape)).shape
-        # self.pos_embedding = nnx.Param(
-        #     nnx.initializers.normal(stddev=0.02)(rngs.params(), (seqlen, model_features))
-        # )
-        self.pos_weight = nnx.Param(
+        self.pos_embedding = nnx.Param(
             nnx.initializers.normal(stddev=0.02)(rngs.params(), (seqlen, model_features))
         )
-        self.pos_bias = nnx.Param(jnp.zeros((seqlen, model_features)))
 
         self.cls_token = nnx.Param(
             nnx.initializers.normal(stddev=0.02)(rngs.params(), (1, model_features))
@@ -179,8 +175,7 @@ class CIFAR10Model(nnx.Module):
     def __call__(self, x: jax.Array):
         x = self.cnn(x)
         batch_size, input_seq_len, _ = x.shape
-        # x += self.pos_embedding[:input_seq_len][None, ...]
-        x = x + self.pos_weight * x + self.pos_bias
+        x += self.pos_embedding[:input_seq_len][None, ...]
 
         x = jnp.concatenate(
             [jnp.full((batch_size, 1, self.model_features), self.cls_token[...]), x], axis=1
