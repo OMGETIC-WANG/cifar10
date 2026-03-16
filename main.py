@@ -9,7 +9,7 @@ import optax
 import typing as T
 
 from dashboard import Dashboard
-import ascii_util
+import time_util
 
 import os
 import time
@@ -290,9 +290,10 @@ def Train(
         test_batch_size = batch_size
 
     if state_save_per_epoch is not None and state_save_path is not None:
-        assert state_save_per_epoch > 0
+        if state_save_per_epoch <= 0:
+            state_save_per_epoch = None
+            state_save_path = None
 
-    progress_bar = ascii_util.ProgressBar("Training", epoch_count, show_percent=False)
     if use_graphic:
         dashboard = Dashboard(
             "Dashboard", {"Loss": ["loss"], "Accuracy": ["accuracy", "test_accuracy"]}
@@ -300,8 +301,10 @@ def Train(
     else:
         dashboard = None
 
+    trainer = time_util.CountPerformance(TrainModelWithMixup)
+
     for epoch in range(epoch_count):
-        TrainModelWithMixup(
+        _, timecost = trainer(
             model,
             optimizer,
             x,
@@ -324,9 +327,7 @@ def Train(
                     optimizer,
                 )
 
-        progress_bar_msg = (
-            f"loss: {epoch_metrics['loss']:.6f}, accuracy: {epoch_metrics['accuracy']:.6f}"
-        )
+        epoch_msg = f"loss: {epoch_metrics['loss']:.6f}, accuracy: {epoch_metrics['accuracy']:.6f}"
         loss_plot_dict = {"loss": epoch_metrics["loss"], "accuracy": epoch_metrics["accuracy"]}
         if (
             eval_per_epoch > 0
@@ -337,16 +338,14 @@ def Train(
             model.eval()
             test_accuracy = TestModel(model, x_test, y_test, test_batch_size)
             model.train()
-            progress_bar_msg += f", test_accuracy: {test_accuracy:.6f}"
+            epoch_msg += f", test_accuracy: {test_accuracy:.6f}"
             loss_plot_dict["test_accuracy"] = test_accuracy
-        progress_bar.Update(epoch + 1, progress_bar_msg)
+        print(f"Epoch {epoch + 1}/{epoch_count} ({timecost:.2f}s) - {epoch_msg}")
         if dashboard is not None:
             dashboard.Update(loss_plot_dict)
 
     if model_save_path is not None:
         model_serialization.SaveModel(model_save_path, model)
-
-    progress_bar.End()
 
 
 @nnx.scan(in_axes=(None, 0, 0), out_axes=0)
@@ -411,6 +410,8 @@ def main(_):
 
     if config.enable_optimization:
         EnableJaxOptimization()
+
+    print(f"-----Config-----\n{config}----------------")
 
     print("Initing model")
     rngs = nnx.Rngs(config.seed)
