@@ -5,12 +5,6 @@ import flax.nnx as nnx
 import typing as T
 
 
-def ApplyTrain(layers: T.Sequence[T.Callable[[jax.Array], jax.Array]], x: jax.Array) -> jax.Array:
-    for layer in layers:
-        x = layer(x)
-    return x
-
-
 class MLP(nnx.Module):
     def __init__(
         self,
@@ -69,14 +63,6 @@ class ResLinear(nnx.Module):
         return x + y
 
 
-class Sequential(nnx.Module):
-    def __init__(self, layers: T.Sequence[T.Callable[[jax.Array], jax.Array]]):
-        self.layers = nnx.List(layers)
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        return ApplyTrain(self.layers, x)
-
-
 class AttachShortcut(nnx.Module):
     def __init__(self, module: nnx.Module):
         self.module = module
@@ -121,11 +107,11 @@ class TransformerBlock(nnx.Module):
 
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
-        self.cnn = Sequential([
+        self.cnn = nnx.Sequential(
             nnx.Conv(3, model_features, (9, 9), padding="VALID", rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
-        ])
+        )
         _, width, height, channels = nnx.eval_shape(
             lambda m, x: m(x), self.cnn, jnp.zeros((1, 32, 32, 3))
         ).shape
@@ -153,10 +139,10 @@ class CIFAR10Model(nnx.Module):
         input_shape,
         rngs: nnx.Rngs,
     ):
-        self.cnn = Sequential([
+        self.cnn = nnx.Sequential(
             PreCNN(model_features, rngs),
             nnx.Dropout(0.4, rngs=rngs),
-        ])
+        )
 
         _, seqlen, _ = nnx.eval_shape(lambda m, x: m(x), self.cnn, jnp.zeros(input_shape)).shape
         # self.pos_embedding = nnx.Param(
@@ -176,7 +162,7 @@ class CIFAR10Model(nnx.Module):
         ])
 
         mlp_dropout_rate = 0.4
-        self.target_logits_mlp = Sequential([
+        self.target_logits_mlp = nnx.Sequential(
             nnx.LayerNorm(model_features, rngs=rngs),
             nnx.Linear(model_features, model_features * 4, rngs=rngs),
             nnx.gelu,
@@ -186,7 +172,7 @@ class CIFAR10Model(nnx.Module):
             nnx.gelu,
             nnx.LayerNorm(model_features * 4, rngs=rngs),
             nnx.Linear(model_features * 4, 10, rngs=rngs),
-        ])
+        )
 
         self.model_features = model_features
 
