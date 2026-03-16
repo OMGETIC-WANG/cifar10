@@ -146,6 +146,7 @@ class CIFAR10Model(nnx.Module):
         ])
 
         self.features_weights = nnx.Param(jnp.full((seqlen, model_features), 1 / model_features))
+        self.features_weights_norm = nnx.BatchNorm(model_features, rngs=rngs)
 
         mlp_dropout_rate = 0.4
         self.target_logits_mlp = nnx.Sequential(
@@ -171,5 +172,6 @@ class CIFAR10Model(nnx.Module):
             x = encoder(x)
 
         x = jnp.einsum("bsf,sf->bf", x, self.features_weights)
+        x = self.features_weights_norm(x)
 
         return self.target_logits_mlp(x)
