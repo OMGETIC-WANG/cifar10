@@ -14,6 +14,10 @@ def get_config():
     config.num_heads = 2
     config.num_encoders = 8
 
+    config.cnn_dropout_rate = 0.2
+    config.encoder_dropout_rate = 0.2
+    config.pre_mlp_dropout_rate = 0.2
+
     config.train_batch_size = 40
     config.epoch_count = 200
 

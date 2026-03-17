@@ -124,11 +124,15 @@ class CIFAR10Model(nnx.Module):
         num_heads: int,
         num_encoder: int,
         input_shape,
+        *,
         rngs: nnx.Rngs,
+        cnn_dropout_rate: float = 0.2,
+        encoder_dropout_rate: float = 0.2,
+        pre_mlp_dropout_rate: float = 0.2,
     ):
         self.cnn = nnx.Sequential(
             PreCNN(model_features, rngs),
-            nnx.Dropout(0.4, rngs=rngs),
+            nnx.Dropout(cnn_dropout_rate, rngs=rngs),
         )
 
         _, seqlen, _ = nnx.eval_shape(lambda m, x: m(x), self.cnn, jnp.zeros(input_shape)).shape
@@ -137,15 +141,15 @@ class CIFAR10Model(nnx.Module):
         )
 
         self.encoders = nnx.List([
-            TransformerBlock(model_features, num_heads, 0.4, rngs) for _ in range(num_encoder)
+            TransformerBlock(model_features, num_heads, encoder_dropout_rate, rngs)
+            for _ in range(num_encoder)
         ])
 
         self.features_weights = nnx.Param(jnp.full((seqlen, model_features), 1 / model_features))
         self.features_weights_norm = nnx.LayerNorm(model_features, rngs=rngs)
 
-        mlp_dropout_rate = 0.4
         self.target_logits_mlp = nnx.Sequential(
-            nnx.Dropout(mlp_dropout_rate, rngs=rngs), nnx.Linear(model_features, 10, rngs=rngs)
+            nnx.Dropout(pre_mlp_dropout_rate, rngs=rngs), nnx.Linear(model_features, 10, rngs=rngs)
         )
 
         self.model_features = model_features

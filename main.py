@@ -260,7 +260,7 @@ def main(_):
                     config.num_heads,
                     config.num_encoders,
                     (config.train_batch_size, 32, 32, 3),
-                    nnx.Rngs(0),
+                    rngs=nnx.Rngs(0),
                 ),
                 lambda model: nnx.Optimizer(
                     model, optax.adamw(config.learning_rate), wrt=nnx.Param
@@ -272,7 +272,10 @@ def main(_):
                 config.num_heads,
                 config.num_encoders,
                 (config.train_batch_size, 32, 32, 3),
-                rngs,
+                rngs=rngs,
+                cnn_dropout_rate=config.cnn_dropout_rate,
+                encoder_dropout_rate=config.encoder_dropout_rate,
+                pre_mlp_dropout_rate=config.pre_mlp_dropout_rate,
             )
             total_steps = config.epoch_count * (trainset_size // config.train_batch_size)
             optimizer_schedule = optax.warmup_cosine_decay_schedule(
@@ -325,7 +328,7 @@ def main(_):
                 config.num_heads,
                 config.num_encoders,
                 (config.test_batch_size, 32, 32, 3),
-                rngs,
+                rngs=rngs,
             ),
         )
 
