@@ -64,8 +64,11 @@ class ResLinear(nnx.Module):
 
 
 class AttachShortcut(nnx.Module):
-    def __init__(self, module: nnx.Module):
-        self.module = module
+    def __init__(self, layers: T.Callable | T.Sequence[T.Callable]):
+        if isinstance(layers, T.Sequence):
+            self.module = nnx.Sequential(*layers)
+        else:
+            self.module = layers
 
     def __call__(self, x: jax.Array) -> jax.Array:
         return x + self.module(x)
@@ -104,7 +107,7 @@ class WeightedAvgPool(nnx.Module):
     def __call__(self, x: jax.Array):
         batch_size, width, height, channels = x.shape
 
-        w = nnx.softplus(self.weight[...])
+        w = jax.nn.squareplus(self.weight[...])
         normed_weight = w / (jnp.sum(w) + 1e-6)
 
         x = x.reshape(batch_size, -1, 4, channels)
