@@ -64,11 +64,8 @@ class ResLinear(nnx.Module):
 
 
 class AttachShortcut(nnx.Module):
-    def __init__(self, layers: T.Callable | T.Sequence[T.Callable]):
-        if isinstance(layers, T.Sequence):
-            self.module = nnx.Sequential(*layers)
-        else:
-            self.module = layers
+    def __init__(self, *fns: T.Callable[..., T.Any]):
+        self.module = nnx.Sequential(*fns)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         return x + self.module(x)
@@ -127,8 +124,10 @@ class PreCNN(nnx.Module):
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
             WeightedAvgPool(32, 32, rngs=rngs),
-            nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
-            nnx.leaky_relu,
+            AttachShortcut(
+                nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
+                nnx.leaky_relu,
+            ),
             nnx.LayerNorm(model_features, rngs=rngs),
         )
 
