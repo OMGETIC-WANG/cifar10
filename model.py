@@ -94,34 +94,44 @@ class TransformerBlock(nnx.Module):
         return x + self.fnn_dropout(y)
 
 
+class WeightedAvgPool(nnx.Module):
+    def __init__(self, width: int, height: int, rngs: nnx.Rngs):
+        assert width % 2 == 0 and height % 2 == 0
+        self.weight = nnx.Param(rngs.uniform(((width // 2) * (height // 2),)))
+        self.out_width = width // 2
+        self.out_height = height // 2
+
+    def __call__(self, x: jax.Array):
+        batch_size, width, height, channels = x.shape
+
+        w = nnx.softplus(self.weight[...])
+        normed_weight = w / (jnp.sum(w) + 1e-6)
+
+        x = x.reshape(batch_size, -1, 4, channels)
+        x = jnp.mean(x, axis=2)
+        x = x * normed_weight[None, :, None]
+        x = x.reshape(batch_size, self.out_width, self.out_height, channels)
+        return x
+
+
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
-            nnx.Conv(3, model_features // 2, (9, 9), padding="VALID", rngs=rngs),
+            nnx.Conv(3, model_features // 2, (3, 3), rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features // 2, rngs=rngs),
-            nnx.Conv(model_features // 2, model_features, (9, 9), padding="VALID", rngs=rngs),
+            nnx.Conv(model_features // 2, model_features, (3, 3), rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
+            WeightedAvgPool(32, 32, rngs=rngs),
             nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
         )
-        _, width, height, channels = nnx.eval_shape(
-            lambda m, x: m(x), self.cnn, jnp.zeros((1, 32, 32, 3))
-        ).shape
-        self.weight_pool = nnx.Param(
-            jax.random.uniform(rngs.params(), ((width // 2) * (height // 2),))
-        )
-        self.norm = nnx.LayerNorm(channels, rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         x = self.cnn(x)
-        batch_size, _, _, channels = x.shape
-        x = x.reshape(batch_size, -1, 4, channels)
-        x = jnp.einsum("bsnc,s->bsc", x, self.weight_pool) / 4
-        x = x.reshape(batch_size, -1, channels)
-        x = self.norm(x)
+        x = x.reshape(x.shape[0], -1, x.shape[-1])
         return x
 
 
