@@ -149,7 +149,8 @@ class CIFAR10Model(nnx.Module):
         self.features_weights_norm = nnx.LayerNorm(model_features, rngs=rngs)
 
         self.target_logits_mlp = nnx.Sequential(
-            nnx.Dropout(pre_mlp_dropout_rate, rngs=rngs), nnx.Linear(model_features, 10, rngs=rngs)
+            nnx.Dropout(pre_mlp_dropout_rate, rngs=rngs),
+            MLP(model_features, 10, [model_features * 4], nnx.gelu, rngs=rngs),
         )
 
         self.model_features = model_features
