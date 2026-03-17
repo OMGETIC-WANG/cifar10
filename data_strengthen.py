@@ -19,7 +19,7 @@ class DataStrengthenConfig(T.NamedTuple):
 
 @jax.jit
 def AddNoise(x: jax.Array, max_noise: float, rngs: nnx.Rngs):
-    noise = jax.random.uniform(rngs.params(), x.shape, minval=0.0, maxval=max_noise)
+    noise = jax.random.uniform(rngs.params(), x.shape, minval=-max_noise, maxval=max_noise)
     x = x + noise
     x = jnp.where(x > 1.0, 1.0, x)
     x = jnp.where(x < 0.0, 0.0, x)
@@ -90,8 +90,9 @@ def ShiftImage(image: jax.Array, horizen_shift: int, vertical_shift: int) -> jax
 def RandomShiftSingleImage(
     image: jax.Array, max_horizen_shift: int, max_vertical_shift: int, random_key: jax.Array
 ) -> jax.Array:
-    horizen_shift = jax.random.randint(random_key, (), -max_horizen_shift, max_horizen_shift)
-    vertical_shift = jax.random.randint(random_key, (), -max_vertical_shift, max_vertical_shift)
+    k1, k2 = jax.random.split(random_key)
+    horizen_shift = jax.random.randint(k1, (), -max_horizen_shift, max_horizen_shift + 1)
+    vertical_shift = jax.random.randint(k2, (), -max_vertical_shift, max_vertical_shift + 1)
     return ShiftImage(image, horizen_shift, vertical_shift)
 
 
