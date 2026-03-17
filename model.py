@@ -94,26 +94,6 @@ class TransformerBlock(nnx.Module):
         return x + self.fnn_dropout(y)
 
 
-class WeightedAvgPool(nnx.Module):
-    def __init__(self, width: int, height: int, rngs: nnx.Rngs):
-        assert width % 2 == 0 and height % 2 == 0
-        self.weight = nnx.Param(rngs.uniform(((width // 2) * (height // 2),)))
-        self.out_width = width // 2
-        self.out_height = height // 2
-
-    def __call__(self, x: jax.Array):
-        batch_size, width, height, channels = x.shape
-
-        w = jax.nn.squareplus(self.weight[...])
-        normed_weight = w / (jnp.sum(w) + 1e-6)
-
-        x = x.reshape(batch_size, -1, 4, channels)
-        x = jnp.mean(x, axis=2)
-        x = x * normed_weight[None, :, None]
-        x = x.reshape(batch_size, self.out_width, self.out_height, channels)
-        return x
-
-
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
@@ -123,7 +103,7 @@ class PreCNN(nnx.Module):
             nnx.Conv(model_features // 2, model_features, (3, 3), rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
-            WeightedAvgPool(32, 32, rngs=rngs),
+            lambda x: nnx.avg_pool(x, (2, 2), (2, 2)),
             AttachShortcut(
                 nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
                 nnx.leaky_relu,
