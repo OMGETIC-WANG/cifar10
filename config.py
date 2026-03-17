@@ -19,7 +19,10 @@ def get_config():
 
     config.test_batch_size = 100
 
-    config.learning_rate = 0.0001
+    config.init_learning_rate = 0.0
+    config.peek_learning_rate = 0.001
+    config.end_learning_rate = 0.0001
+    config.warmup_steps = -1  # default = total_steps // 10
 
     config.state_save_per_epoch = 10
     config.model_save_dir = "./cache"

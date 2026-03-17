@@ -276,11 +276,13 @@ def main(_):
             )
             total_steps = config.epoch_count * (trainset_size // config.train_batch_size)
             optimizer_schedule = optax.warmup_cosine_decay_schedule(
-                0.0,
-                config.learning_rate,
+                init_value=config.init_learning_rate,
+                peak_value=config.peek_learning_rate,
+                end_value=config.end_learning_rate,
+                warmup_steps=config.warmup_steps
+                if config.warmup_steps != -1
+                else total_steps // 10,
                 decay_steps=total_steps,
-                warmup_steps=total_steps // 10,
-                end_value=1e-6,
             )
             optimizer = nnx.Optimizer(
                 model, optax.adamw(optimizer_schedule, weight_decay=1e-2), wrt=nnx.Param
