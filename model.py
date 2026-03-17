@@ -97,7 +97,10 @@ class TransformerBlock(nnx.Module):
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
-            nnx.Conv(3, model_features, (9, 9), padding="VALID", rngs=rngs),
+            nnx.Conv(3, model_features // 2, (9, 9), padding="VALID", rngs=rngs),
+            nnx.leaky_relu,
+            nnx.LayerNorm(model_features // 2, rngs=rngs),
+            nnx.Conv(model_features // 2, model_features, (9, 9), padding="VALID", rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
             nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
