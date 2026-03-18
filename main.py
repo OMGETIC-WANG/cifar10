@@ -74,8 +74,7 @@ def TrainModel(
     x = ApplyStrengthen(x, strengthen_config, rngs)
 
     if mixer is not None:
-        indices2 = jax.random.permutation(rngs.params(), jnp.arange(x.shape[0]))
-        x, y = mixer(x, y, x[indices2], y[indices2], rngs, strengthen_config)
+        x, y = mixer(x, y, jnp.roll(x, 1, axis=0), jnp.roll(y, 1, axis=0), rngs, strengthen_config)
 
     x, y = BatchDatas((x, y), batch_size)
 
