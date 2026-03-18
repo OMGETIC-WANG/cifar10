@@ -126,17 +126,16 @@ def ApplyStrengthen(x: jax.Array, strengthen_config: DataStrengthenConfig, rngs:
 
 @nnx.jit(static_argnames=["strengthen_config"])
 def Mixup(
-    xy: tuple[jax.Array, jax.Array],
+    x1: jax.Array,
+    y1: jax.Array,
+    x2: jax.Array,
+    y2: jax.Array,
     rngs: nnx.Rngs,
     strengthen_config: DataStrengthenConfig,
 ):
-    # xy.x: (2, batch_size, weight, height, channels)
-    # x1.shape: (batch_size, weight, height, channels)
-    # xy.y: (2, batch_size)
-    # y1.shape: (batch_size,)
-    (x1, x2), (y1, y2) = xy
-    weight = strengthen_config.mixup_weight
-    weight = rngs.beta(weight, weight, (x1.shape[0], 1, 1, 1))
+    weight = rngs.beta(
+        strengthen_config.mixup_weight, strengthen_config.mixup_weight, (x1.shape[0], 1, 1, 1)
+    )
     label_weight = weight.reshape(-1, 1)
 
     x_mixed = x1 * weight + x2 * (1 - weight)

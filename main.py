@@ -61,7 +61,7 @@ def TrainModel(
     strengthen_config: DataStrengthenConfig,
     mixer: T.Optional[
         T.Callable[
-            [tuple[jax.Array, jax.Array], nnx.Rngs, DataStrengthenConfig],
+            [jax.Array, jax.Array, jax.Array, jax.Array, nnx.Rngs, DataStrengthenConfig],
             tuple[jax.Array, jax.Array],
         ]
     ] = None,
@@ -74,14 +74,8 @@ def TrainModel(
     x = ApplyStrengthen(x, strengthen_config, rngs)
 
     if mixer is not None:
-        x, y = mixer(
-            (
-                x.reshape(2, x.shape[0] // 2, *x.shape[1:]),
-                y.reshape(2, y.shape[0] // 2, *y.shape[1:]),
-            ),
-            rngs,
-            strengthen_config,
-        )
+        indices2 = jax.random.permutation(rngs.params(), jnp.arange(x.shape[0]))
+        x, y = mixer(x, y, x[indices2], y[indices2], rngs, strengthen_config)
 
     x, y = BatchDatas((x, y), batch_size)
 
