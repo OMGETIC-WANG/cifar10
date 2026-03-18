@@ -157,8 +157,8 @@ def Train(
                     optimizer,
                 )
 
-        epoch_msg = f"loss: {epoch_metrics['loss']:.6f}, accuracy: {epoch_metrics['accuracy']:.6f}"
-        loss_plot_dict = {"loss": epoch_metrics["loss"], "acc": epoch_metrics["accuracy"]}
+        epoch_msg = f"loss: {epoch_metrics['loss']:.6f}, acc: {epoch_metrics['accuracy']:.6f}"
+        loss_plot_dict = {"loss": epoch_metrics["loss"], "accuracy": epoch_metrics["accuracy"]}
         if (
             eval_per_epoch > 0
             and x_test is not None
