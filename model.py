@@ -94,6 +94,26 @@ class TransformerBlock(nnx.Module):
         return x + self.fnn_dropout(y)
 
 
+class EncoderConvBlock(nnx.Module):
+    def __init__(
+        self,
+        features: int,
+        num_heads: int,
+        dropout_rate: float,
+        *,
+        rngs: nnx.Rngs,
+    ):
+        self.encoder = TransformerBlock(features, num_heads, dropout_rate, rngs)
+        self.conv = AttachShortcut(
+            nnx.Conv(features, features, (3, 3), padding="SAME", rngs=rngs),
+            nnx.leaky_relu,
+            nnx.LayerNorm(features, rngs=rngs),
+        )
+
+    def __call__(self, x: jax.Array):
+        return jnp.mean(jnp.stack([self.encoder(x), self.conv(x)]), axis=0)
+
+
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
@@ -141,7 +161,7 @@ class CIFAR10Model(nnx.Module):
         )
 
         self.encoders = nnx.List([
-            TransformerBlock(model_features, num_heads, encoder_dropout_rate, rngs)
+            EncoderConvBlock(model_features, num_heads, encoder_dropout_rate, rngs=rngs)
             for _ in range(num_encoder)
         ])
 
