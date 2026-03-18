@@ -158,7 +158,7 @@ def Train(
                 )
 
         epoch_msg = f"loss: {epoch_metrics['loss']:.6f}, accuracy: {epoch_metrics['accuracy']:.6f}"
-        loss_plot_dict = {"loss": epoch_metrics["loss"], "accuracy": epoch_metrics["accuracy"]}
+        loss_plot_dict = {"loss": epoch_metrics["loss"], "acc": epoch_metrics["accuracy"]}
         if (
             eval_per_epoch > 0
             and x_test is not None
@@ -168,7 +168,7 @@ def Train(
             model.eval()
             test_accuracy = TestModel(model, x_test, y_test, test_batch_size)
             model.train()
-            epoch_msg += f", test_accuracy: {test_accuracy:.6f}"
+            epoch_msg += f", test_acc: {test_accuracy:.6f}"
             loss_plot_dict["test_accuracy"] = test_accuracy
         print(f"Epoch {epoch + 1}/{epoch_count} ({timecost:.2f}s) - {epoch_msg}")
         if dashboard is not None:
