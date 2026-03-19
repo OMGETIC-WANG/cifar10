@@ -136,6 +136,7 @@ class PreCNN(nnx.Module):
             MultiKernelConv(3, model_features // 2, [(3, 3), (5, 5)], rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features // 2, rngs=rngs),
+            nnx.Dropout(0.2, rngs=rngs, broadcast_dims=[1, 2]),
             MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
@@ -168,7 +169,7 @@ class CIFAR10Model(nnx.Module):
     ):
         self.cnn = nnx.Sequential(
             PreCNN(model_features, rngs),
-            nnx.Dropout(cnn_dropout_rate, rngs=rngs),
+            nnx.Dropout(cnn_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
         )
 
         _, seqlen, _ = nnx.eval_shape(lambda m, x: m(x), self.cnn, jnp.zeros(input_shape)).shape
