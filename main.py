@@ -288,7 +288,9 @@ def main(_):
                 decay_steps=total_steps,
             )
             optimizer = nnx.Optimizer(
-                model, optax.adamw(optimizer_schedule, weight_decay=1e-2), wrt=nnx.Param
+                model,
+                optax.adamw(optimizer_schedule, weight_decay=config.adamw_weight_decay),
+                wrt=nnx.Param,
             )
 
         print(f"Model param count: {CountModuleParams(model)}")
