@@ -200,6 +200,7 @@ class CIFAR10Model(nnx.Module):
         cnn_dropout_rate: float = 0.2,
         encoder_dropout_rate: float = 0.2,
         pre_mlp_dropout_rate: float = 0.2,
+        num_register_tokens: int = 16,
     ):
         self.cnn = nnx.Sequential(
             PreCNN(model_features, rngs),
@@ -210,6 +211,8 @@ class CIFAR10Model(nnx.Module):
         self.pos_embedding = nnx.Param(
             nnx.initializers.normal(stddev=0.02)(rngs.params(), (seqlen, model_features))
         )
+
+        self.register_tokens = nnx.Param(jnp.zeros((num_register_tokens, model_features)))
 
         self.encoders = nnx.List([
             TransformerBlock(model_features, num_heads, encoder_dropout_rate, rngs=rngs)
@@ -231,8 +234,18 @@ class CIFAR10Model(nnx.Module):
         batch_size, input_seq_len, _ = x.shape
         x += self.pos_embedding[:input_seq_len][None, ...]
 
+        x = jnp.concatenate(
+            [
+                x,
+                jnp.full((batch_size, *self.register_tokens.shape), self.register_tokens[...]),
+            ],
+            axis=1,
+        )
+
         for encoder in self.encoders:
             x = encoder(x)
+
+        x = x[:, :input_seq_len, :]
 
         w = jax.nn.squareplus(self.features_weights[...])
         x = jnp.sum(x * w[None, ...], axis=1) / jnp.sum(w, axis=0)[None, ...]

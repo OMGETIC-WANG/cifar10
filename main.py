@@ -269,6 +269,7 @@ def main(_):
                 cnn_dropout_rate=config.cnn_dropout_rate,
                 encoder_dropout_rate=config.encoder_dropout_rate,
                 pre_mlp_dropout_rate=config.pre_mlp_dropout_rate,
+                num_register_tokens=config.num_register_tokens,
             )
 
             total_steps = config.epoch_count * (trainset_size // config.train_batch_size)
