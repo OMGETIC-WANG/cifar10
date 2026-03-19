@@ -163,6 +163,8 @@ class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
             MultiKernelConv(3, model_features // 2, [(3, 3), (5, 5)], rngs=rngs),
+            nnx.leaky_relu,
+            nnx.LayerNorm(model_features // 2, rngs=rngs),
             nnx.Dropout(0.2, rngs=rngs, broadcast_dims=[1, 2]),
             AttachShortcut(
                 MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
