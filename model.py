@@ -94,33 +94,49 @@ class TransformerBlock(nnx.Module):
         return x + self.fnn_dropout(y)
 
 
-class EncoderConvBlock(nnx.Module):
+class MultiKernelConv(nnx.Module):
     def __init__(
         self,
-        features: int,
-        num_heads: int,
-        dropout_rate: float,
-        *,
+        in_features: int,
+        out_features: int,
+        kernel_sizes: T.Sequence[int | T.Sequence[int]],
+        *args,
         rngs: nnx.Rngs,
+        use_shortcut: bool = False,
+        **kwargs,
     ):
-        self.encoder = TransformerBlock(features, num_heads, dropout_rate, rngs)
-        self.conv = AttachShortcut(
-            nnx.Conv(features, features, (3, 3), padding="SAME", rngs=rngs),
-            nnx.leaky_relu,
-            nnx.LayerNorm(features, rngs=rngs),
-        )
+        assert out_features % len(kernel_sizes) == 0
+
+        self.convs = nnx.List([
+            nnx.Conv(
+                in_features,
+                out_features // len(kernel_sizes),
+                kernel_size,
+                padding="SAME",
+                rngs=rngs,
+                *args,
+                **kwargs,
+            )
+            for kernel_size in kernel_sizes
+        ])
+        self.use_shortcut = use_shortcut
+        if use_shortcut:
+            assert in_features == out_features
 
     def __call__(self, x: jax.Array):
-        return jnp.mean(jnp.stack([self.encoder(x), self.conv(x)]), axis=0)
+        y = jnp.concatenate([conv(x) for conv in self.convs], axis=-1)
+        if self.use_shortcut:
+            y += x
+        return y
 
 
 class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
-            nnx.Conv(3, model_features // 2, (3, 3), rngs=rngs),
+            MultiKernelConv(3, model_features // 2, [(3, 3), (5, 5)], rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features // 2, rngs=rngs),
-            nnx.Conv(model_features // 2, model_features, (3, 3), rngs=rngs),
+            MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features, rngs=rngs),
             lambda x: nnx.avg_pool(x, (2, 2), (2, 2)),
@@ -161,7 +177,7 @@ class CIFAR10Model(nnx.Module):
         )
 
         self.encoders = nnx.List([
-            EncoderConvBlock(model_features, num_heads, encoder_dropout_rate, rngs=rngs)
+            TransformerBlock(model_features, num_heads, encoder_dropout_rate, rngs=rngs)
             for _ in range(num_encoder)
         ])
 
