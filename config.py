@@ -15,7 +15,9 @@ def get_config():
     config.num_encoders = 8
     config.num_register_tokens = 16
 
-    config.cnn_dropout_rate = 0.2
+    config.cnn_first_dropout_rate = 0.1
+    config.cnn_second_dropout_rate = 0.1
+    config.cnn_final_dropout_rate = 0.1
     config.encoder_dropout_rate = 0.2
     config.pre_mlp_dropout_rate = 0.2
 

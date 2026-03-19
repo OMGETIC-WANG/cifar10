@@ -160,12 +160,19 @@ class MultiKernelConv(nnx.Module):
 
 
 class PreCNN(nnx.Module):
-    def __init__(self, model_features: int, rngs: nnx.Rngs):
+    def __init__(
+        self,
+        model_features: int,
+        *,
+        rngs: nnx.Rngs,
+        first_dropout_rate: float = 0.1,
+        second_dropout_rate: float = 0.1,
+    ):
         self.cnn = nnx.Sequential(
             MultiKernelConv(3, model_features // 2, [(3, 3), (5, 5)], rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(model_features // 2, rngs=rngs),
-            nnx.Dropout(0.2, rngs=rngs, broadcast_dims=[1, 2]),
+            nnx.Dropout(first_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
             AttachShortcut(
                 MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
                 in_out=(model_features // 2, model_features),
@@ -173,7 +180,7 @@ class PreCNN(nnx.Module):
                 rngs=rngs,
             ),
             lambda x: nnx.avg_pool(x, (2, 2), (2, 2)),
-            nnx.Dropout(0.1, rngs=rngs, broadcast_dims=[1, 2]),
+            nnx.Dropout(second_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
             AttachShortcut(
                 nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
                 in_out=(model_features, model_features),
@@ -197,14 +204,21 @@ class CIFAR10Model(nnx.Module):
         input_shape,
         *,
         rngs: nnx.Rngs,
-        cnn_dropout_rate: float = 0.2,
+        cnn_first_dropout_rate: float = 0.1,
+        cnn_second_dropout_rate: float = 0.1,
+        cnn_final_dropout_rate: float = 0.1,
         encoder_dropout_rate: float = 0.2,
         pre_mlp_dropout_rate: float = 0.2,
         num_register_tokens: int = 16,
     ):
         self.cnn = nnx.Sequential(
-            PreCNN(model_features, rngs),
-            nnx.Dropout(cnn_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
+            PreCNN(
+                model_features,
+                rngs=rngs,
+                first_dropout_rate=cnn_first_dropout_rate,
+                second_dropout_rate=cnn_second_dropout_rate,
+            ),
+            nnx.Dropout(cnn_final_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
         )
 
         _, seqlen, _ = nnx.eval_shape(lambda m, x: m(x), self.cnn, jnp.zeros(input_shape)).shape
