@@ -64,11 +64,40 @@ class ResLinear(nnx.Module):
 
 
 class AttachShortcut(nnx.Module):
-    def __init__(self, *fns: T.Callable[..., T.Any]):
+    def __init__(
+        self,
+        *fns: T.Callable[..., T.Any],
+        activation: T.Callable[[jax.Array], jax.Array] = lambda x: x,
+        norm_t: T.Optional[T.Type] = nnx.LayerNorm,
+        shortcut_norm_t: T.Optional[T.Type] = nnx.LayerNorm,
+        in_out: tuple[int, int],
+        rngs: T.Optional[nnx.Rngs] = None,
+    ):
+        in_channels, out_channels = in_out
         self.module = nnx.Sequential(*fns)
 
+        self.norm = norm_t(out_channels, rngs=rngs) if norm_t is not None else None
+        self.shortcut_norm = (
+            shortcut_norm_t(out_channels, rngs=rngs) if shortcut_norm_t is not None else None
+        )
+
+        self.use_channel_proj = in_channels != out_channels
+        if self.use_channel_proj:
+            assert in_channels > 0 and out_channels > 0
+            assert rngs is not None
+            self.channel_proj = nnx.Linear(in_channels, out_channels, use_bias=False, rngs=rngs)
+
+        self.activation = activation
+
     def __call__(self, x: jax.Array) -> jax.Array:
-        return x + self.module(x)
+        y = self.module(x)
+        if self.norm is not None:
+            y = self.norm(y)
+        if self.use_channel_proj:
+            x = self.channel_proj(x)
+        if self.shortcut_norm is not None:
+            x = self.shortcut_norm(x)
+        return self.activation(x + y)
 
 
 class TransformerBlock(nnx.Module):
@@ -134,18 +163,21 @@ class PreCNN(nnx.Module):
     def __init__(self, model_features: int, rngs: nnx.Rngs):
         self.cnn = nnx.Sequential(
             MultiKernelConv(3, model_features // 2, [(3, 3), (5, 5)], rngs=rngs),
-            nnx.leaky_relu,
-            nnx.LayerNorm(model_features // 2, rngs=rngs),
             nnx.Dropout(0.2, rngs=rngs, broadcast_dims=[1, 2]),
-            MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
-            nnx.leaky_relu,
-            nnx.LayerNorm(model_features, rngs=rngs),
+            AttachShortcut(
+                MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
+                in_out=(model_features // 2, model_features),
+                activation=nnx.leaky_relu,
+                rngs=rngs,
+            ),
             lambda x: nnx.avg_pool(x, (2, 2), (2, 2)),
+            nnx.Dropout(0.1, rngs=rngs, broadcast_dims=[1, 2]),
             AttachShortcut(
                 nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
-                nnx.leaky_relu,
+                in_out=(model_features, model_features),
+                activation=nnx.leaky_relu,
+                rngs=rngs,
             ),
-            nnx.LayerNorm(model_features, rngs=rngs),
         )
 
     def __call__(self, x: jax.Array) -> jax.Array:
