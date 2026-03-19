@@ -270,14 +270,20 @@ def main(_):
                 encoder_dropout_rate=config.encoder_dropout_rate,
                 pre_mlp_dropout_rate=config.pre_mlp_dropout_rate,
             )
+
             total_steps = config.epoch_count * (trainset_size // config.train_batch_size)
+            if config.warmup_steps != -1:
+                warmup_steps = config.warmup_steps
+            elif config.warmup_steps_percent != -1.0:
+                warmup_steps = int(total_steps * config.warmup_steps_percent)
+            else:
+                warmup_steps = total_steps // 10
+
             optimizer_schedule = optax.warmup_cosine_decay_schedule(
                 init_value=config.init_learning_rate,
                 peak_value=config.peek_learning_rate,
                 end_value=config.end_learning_rate,
-                warmup_steps=config.warmup_steps
-                if config.warmup_steps != -1
-                else total_steps // 10,
+                warmup_steps=warmup_steps,
                 decay_steps=total_steps,
             )
             optimizer = nnx.Optimizer(
