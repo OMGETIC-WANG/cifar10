@@ -13,7 +13,7 @@ class _ParamReturner(nnx.Module):
 
 
 def HyperConnectionInit_fn(x: jax.Array, num_split: int):
-    return jnp.full((num_split, *x.shape), x)
+    return jnp.broadcast_to(x, (num_split, *x.shape))
 
 
 class HyperConnectionInit(nnx.Module):
@@ -21,7 +21,7 @@ class HyperConnectionInit(nnx.Module):
         self.num_split = num_split
 
     def __call__(self, x: jax.Array):
-        return jnp.full((self.num_split, *x.shape), x)
+        return HyperConnectionInit_fn(x, self.num_split)
 
 
 def HyperConnectionEnd_fn(x: jax.Array):
@@ -65,19 +65,14 @@ class HyperConnectionShortcut(nnx.Module):
             self.gen_residual_weight = residual_weight_gen
 
     def __call__(self, x: jax.Array):
-        input_shape = x.shape
-        batch_count = input_shape[1]
-        module_input_shape = input_shape[1:]
-
-        x = x.reshape(self.num_split, batch_count, -1)
-
         pre_input_weight = self.gen_pre_input_weight(x)
         post_layer_weight = self.gen_post_layer_weight(x)
         residual_weight = self.gen_residual_weight(x)
 
-        module_in = jnp.einsum("hbi,h->bi", x, pre_input_weight).reshape(module_input_shape)
-        module_out = self.module(module_in).reshape(batch_count, -1)
-        module_out = jnp.einsum("bi,h->hbi", module_out, post_layer_weight)
-        residual = jnp.einsum("Hbi,Hh->hbi", x, residual_weight)
+        module_in = jnp.einsum("h...,h->...", x, pre_input_weight)
+        module_out = self.module(module_in)
+        module_out = jnp.einsum("...,h->h...", module_out, post_layer_weight)
 
-        return (module_out + residual).reshape(input_shape)
+        residual = jnp.einsum("h...,hk->k...", x, residual_weight)
+
+        return module_out + residual
