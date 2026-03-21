@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import flax
 import flax.nnx as nnx
 import typing as T
+from hyper_connection import HyperConnectionShortcut, HyperConnectionInit, HyperConnectionEnd
 
 
 class MLP(nnx.Module):
@@ -123,6 +124,38 @@ class TransformerBlock(nnx.Module):
         return x + self.fnn_dropout(y)
 
 
+class HyperConnectionTransformerBlock(nnx.Module):
+    def __init__(
+        self, num_split: int, in_features: int, num_heads: int, dropout_rate: float, rngs: nnx.Rngs
+    ):
+        self.attention_layer = HyperConnectionShortcut(
+            nnx.LayerNorm(in_features, rngs=rngs),
+            nnx.MultiHeadAttention(
+                num_heads,
+                in_features,
+                use_bias=False,
+                rngs=rngs,
+                kernel_init=nnx.initializers.xavier_uniform(),
+                decode=False,
+            ),
+            num_split=num_split,
+            rngs=rngs,
+        )
+
+        self.fnn_layer = HyperConnectionShortcut(
+            nnx.LayerNorm(in_features, rngs=rngs),
+            MLP(in_features, in_features, [in_features * 4], nnx.gelu, rngs=rngs),
+            nnx.Dropout(dropout_rate, rngs=rngs),
+            num_split=num_split,
+            rngs=rngs,
+        )
+
+    def __call__(self, x: jax.Array):
+        x = self.attention_layer(x)
+        x = self.fnn_layer(x)
+        return x
+
+
 class MultiKernelConv(nnx.Module):
     def __init__(
         self,
@@ -204,6 +237,7 @@ class CIFAR10Model(nnx.Module):
         input_shape,
         *,
         rngs: nnx.Rngs,
+        num_split: int = 2,
         cnn_first_dropout_rate: float = 0.1,
         cnn_second_dropout_rate: float = 0.1,
         cnn_final_dropout_rate: float = 0.1,
@@ -228,10 +262,14 @@ class CIFAR10Model(nnx.Module):
 
         self.register_tokens = nnx.Param(jnp.zeros((num_register_tokens, model_features)))
 
+        self.init_hyper_connection = HyperConnectionInit(num_split=num_split)
         self.encoders = nnx.List([
-            TransformerBlock(model_features, num_heads, encoder_dropout_rate, rngs=rngs)
+            HyperConnectionTransformerBlock(
+                num_split, model_features, num_heads, encoder_dropout_rate, rngs=rngs
+            )
             for _ in range(num_encoder)
         ])
+        self.end_hyper_connection = HyperConnectionEnd()
 
         self.features_weights = nnx.Param(jnp.full((seqlen, model_features), 1 / model_features))
         self.features_weights_norm = nnx.LayerNorm(model_features, rngs=rngs)
@@ -256,8 +294,10 @@ class CIFAR10Model(nnx.Module):
             axis=1,
         )
 
+        x = self.init_hyper_connection(x)
         for encoder in self.encoders:
             x = encoder(x)
+        x = self.end_hyper_connection(x)
 
         x = x[:, :input_seq_len, :]
 

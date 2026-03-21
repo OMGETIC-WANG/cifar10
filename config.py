@@ -13,6 +13,7 @@ def get_config():
     config.model_features = 128
     config.num_heads = 2
     config.num_encoders = 8
+    config.num_split = 2
     config.num_register_tokens = 16
 
     config.cnn_first_dropout_rate = 0.1

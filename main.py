@@ -266,6 +266,7 @@ def main(_):
                 config.num_encoders,
                 (config.train_batch_size, 32, 32, 3),
                 rngs=rngs,
+                num_split=config.num_split,
                 cnn_first_dropout_rate=config.cnn_first_dropout_rate,
                 cnn_second_dropout_rate=config.cnn_second_dropout_rate,
                 cnn_final_dropout_rate=config.cnn_final_dropout_rate,
