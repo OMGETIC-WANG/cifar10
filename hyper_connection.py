@@ -69,10 +69,10 @@ class HyperConnectionShortcut(nnx.Module):
         post_layer_weight = self.gen_post_layer_weight(x)
         residual_weight = self.gen_residual_weight(x)
 
-        module_in = jnp.einsum("h...,h->...", x, pre_input_weight)
+        module_in = jnp.tensordot(pre_input_weight, x, axes=1)
         module_out = self.module(module_in)
-        module_out = jnp.einsum("...,h->h...", module_out, post_layer_weight)
+        module_out = jnp.tensordot(post_layer_weight, module_out, axes=0)
 
-        residual = jnp.einsum("h...,hk->k...", x, residual_weight)
+        residual = jnp.tensordot(residual_weight, x, axes=([0], [0]))
 
         return module_out + residual
