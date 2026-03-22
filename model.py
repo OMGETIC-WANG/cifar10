@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import flax
 import flax.nnx as nnx
 import typing as T
-from hyper_connection import HyperConnectionShortcut, HyperConnectionInit, HyperConnectionEnd
+from double_connection import DoubleConnectionShortcut
 
 
 class MLP(nnx.Module):
@@ -26,134 +26,6 @@ class MLP(nnx.Module):
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
         return self.layers[-1](x)
-
-
-class ResLinear(nnx.Module):
-    def __init__(
-        self,
-        features: int,
-        activation: T.Callable[[jax.Array], jax.Array],
-        *,
-        use_batchnorm: bool = False,
-        use_dropout: bool = False,
-        dropout_rate: float = 0.1,
-        rngs: nnx.Rngs,
-    ):
-        self.linear = nnx.Linear(features, features, rngs=rngs)
-        self.activation = activation
-
-        self.use_batchnorm = use_batchnorm
-        if use_batchnorm:
-            self.batchnorm = nnx.BatchNorm(features, rngs=rngs)
-        self.use_dropout = use_dropout
-        if use_dropout:
-            self.dropout = nnx.Dropout(dropout_rate, rngs=rngs)
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        y = jax.lax.cond(
-            self.use_batchnorm,
-            lambda inst, x: inst.batchnorm(x),
-            lambda inst, x: x,
-            self,
-            self.linear(x),
-        )
-        y = self.activation(y)
-        y = jax.lax.cond(
-            self.use_dropout, lambda inst, x: inst.dropout(x), lambda inst, x: x, self, y
-        )
-        return x + y
-
-
-class AttachShortcut(nnx.Module):
-    def __init__(
-        self,
-        *fns: T.Callable[..., T.Any],
-        activation: T.Callable[[jax.Array], jax.Array] = lambda x: x,
-        norm_t: T.Optional[T.Type] = nnx.LayerNorm,
-        shortcut_norm_t: T.Optional[T.Type] = nnx.LayerNorm,
-        in_out: tuple[int, int],
-        rngs: T.Optional[nnx.Rngs] = None,
-    ):
-        in_channels, out_channels = in_out
-        self.module = nnx.Sequential(*fns)
-
-        self.norm = norm_t(out_channels, rngs=rngs) if norm_t is not None else None
-        self.shortcut_norm = (
-            shortcut_norm_t(out_channels, rngs=rngs) if shortcut_norm_t is not None else None
-        )
-
-        self.use_channel_proj = in_channels != out_channels
-        if self.use_channel_proj:
-            assert in_channels > 0 and out_channels > 0
-            assert rngs is not None
-            self.channel_proj = nnx.Linear(in_channels, out_channels, use_bias=False, rngs=rngs)
-
-        self.activation = activation
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        y = self.module(x)
-        if self.norm is not None:
-            y = self.norm(y)
-        if self.use_channel_proj:
-            x = self.channel_proj(x)
-        if self.shortcut_norm is not None:
-            x = self.shortcut_norm(x)
-        return self.activation(x + y)
-
-
-class TransformerBlock(nnx.Module):
-    def __init__(self, in_features: int, num_heads: int, dropout_rate: float, rngs: nnx.Rngs):
-        self.attention = nnx.MultiHeadAttention(
-            num_heads,
-            in_features,
-            use_bias=False,
-            rngs=rngs,
-            kernel_init=nnx.initializers.xavier_uniform(),
-            decode=False,
-        )
-        self.fnn = MLP(in_features, in_features, [in_features * 4], nnx.gelu, rngs=rngs)
-
-        self.pre_attention_norm = nnx.LayerNorm(in_features, rngs=rngs)
-        self.pre_fnn_norm = nnx.LayerNorm(in_features, rngs=rngs)
-
-        self.fnn_dropout = nnx.Dropout(dropout_rate, rngs=rngs)
-
-    def __call__(self, x: jax.Array):
-        x = x + self.attention(self.pre_attention_norm(x))
-        y = self.fnn(self.pre_fnn_norm(x))
-        return x + self.fnn_dropout(y)
-
-
-class HyperConnectionTransformerBlock(nnx.Module):
-    def __init__(
-        self, num_split: int, in_features: int, num_heads: int, dropout_rate: float, rngs: nnx.Rngs
-    ):
-        self.attention_layer = HyperConnectionShortcut(
-            nnx.LayerNorm(in_features, rngs=rngs),
-            nnx.MultiHeadAttention(
-                num_heads,
-                in_features,
-                use_bias=False,
-                rngs=rngs,
-                kernel_init=nnx.initializers.xavier_uniform(),
-                decode=False,
-            ),
-            num_split=num_split,
-            rngs=rngs,
-        )
-
-        self.fnn_layer = HyperConnectionShortcut(
-            nnx.LayerNorm(in_features, rngs=rngs),
-            MLP(in_features, in_features, [in_features * 4], nnx.gelu, rngs=rngs),
-            nnx.Dropout(dropout_rate, rngs=rngs),
-            num_split=num_split,
-            rngs=rngs,
-        )
-
-    def __call__(self, x: jax.Array):
-        x = self.attention_layer(x)
-        x = self.fnn_layer(x)
-        return x
 
 
 class MultiKernelConv(nnx.Module):
@@ -192,117 +64,95 @@ class MultiKernelConv(nnx.Module):
         return y
 
 
-class PreCNN(nnx.Module):
+class SEConv(nnx.Module):
     def __init__(
         self,
-        model_features: int,
-        *,
-        rngs: nnx.Rngs,
-        first_dropout_rate: float = 0.1,
-        second_dropout_rate: float = 0.1,
+        conv: T.Callable[[jax.Array], jax.Array],
+        scale_mlp: T.Optional[T.Callable[[jax.Array], jax.Array]] = None,
+        scale_mlp_features: T.Optional[int] = None,
+        rngs: T.Optional[nnx.Rngs] = None,
     ):
-        self.cnn = nnx.Sequential(
-            MultiKernelConv(3, model_features // 2, [(3, 3), (5, 5)], rngs=rngs),
-            nnx.leaky_relu,
-            nnx.LayerNorm(model_features // 2, rngs=rngs),
-            nnx.Dropout(first_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
-            AttachShortcut(
-                MultiKernelConv(model_features // 2, model_features, [(3, 3), (5, 5)], rngs=rngs),
-                in_out=(model_features // 2, model_features),
-                activation=nnx.leaky_relu,
-                rngs=rngs,
-            ),
-            lambda x: nnx.avg_pool(x, (2, 2), (2, 2)),
-            nnx.Dropout(second_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
-            AttachShortcut(
-                nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
-                in_out=(model_features, model_features),
-                activation=nnx.leaky_relu,
-                rngs=rngs,
-            ),
-        )
+        self.conv = conv
+        if scale_mlp is None:
+            assert scale_mlp_features is not None and scale_mlp_features > 0, (
+                "Default init scale_mlp requires scale_mlp_features > 0"
+            )
+            assert rngs is not None, "Default init scale_mlp requires rngs"
 
-    def __call__(self, x: jax.Array) -> jax.Array:
-        x = self.cnn(x)
-        x = x.reshape(x.shape[0], -1, x.shape[-1])
-        return x
+            def sigmoid_avg(x: jax.Array):
+                x = nnx.sigmoid(x)
+                return x / (jnp.sum(x, axis=-1, keepdims=True) + 1e-8)
+
+            self.scale_mlp = nnx.Sequential(
+                MLP(
+                    scale_mlp_features,
+                    scale_mlp_features,
+                    [scale_mlp_features * 2],
+                    nnx.leaky_relu,
+                    rngs=rngs,
+                ),
+                sigmoid_avg,
+            )
+        else:
+            self.scale_mlp = scale_mlp
+
+    def __call__(self, x: jax.Array):
+        y = self.conv(x)
+        scale = self.scale_mlp(jnp.mean(y, axis=(1, 2)))
+        return y * scale[:, None, None, :]
 
 
 class CIFAR10Model(nnx.Module):
     def __init__(
         self,
-        model_features: int,
-        num_heads: int,
-        num_encoder: int,
-        input_shape,
         *,
+        model_features: int,
+        before_pool_conv_count: int = 4,
+        after_pool_conv_count: int = 8,
         rngs: nnx.Rngs,
-        num_split: int = 2,
-        cnn_first_dropout_rate: float = 0.1,
-        cnn_second_dropout_rate: float = 0.1,
-        cnn_final_dropout_rate: float = 0.1,
-        encoder_dropout_rate: float = 0.2,
-        pre_mlp_dropout_rate: float = 0.2,
-        num_register_tokens: int = 16,
+        expand_channel_droprate: float = 0.1,
+        cnn_conv_droprate: float = 0.1,
     ):
-        self.cnn = nnx.Sequential(
-            PreCNN(
-                model_features,
+        self.expand_channel = nnx.Sequential(
+            nnx.Conv(3, model_features, (3, 3), rngs=rngs),
+            nnx.leaky_relu,
+            nnx.LayerNorm(model_features, rngs=rngs),
+            nnx.Dropout(expand_channel_droprate, broadcast_dims=(1, 2), rngs=rngs),
+        )
+
+        build_cnn_layer = lambda: DoubleConnectionShortcut(
+            SEConv(
+                nnx.Sequential(
+                    nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
+                    nnx.leaky_relu,
+                    nnx.LayerNorm(model_features, rngs=rngs),
+                ),
+                scale_mlp_features=model_features,
                 rngs=rngs,
-                first_dropout_rate=cnn_first_dropout_rate,
-                second_dropout_rate=cnn_second_dropout_rate,
             ),
-            nnx.Dropout(cnn_final_dropout_rate, rngs=rngs, broadcast_dims=[1, 2]),
+            nnx.Dropout(cnn_conv_droprate, broadcast_dims=(1, 2), rngs=rngs),
+            rngs=rngs,
         )
+        self.cnn = nnx.Sequential(*[build_cnn_layer() for _ in range(before_pool_conv_count)])
 
-        _, seqlen, _ = nnx.eval_shape(lambda m, x: m(x), self.cnn, jnp.zeros(input_shape)).shape
-        self.pos_embedding = nnx.Param(
-            nnx.initializers.normal(stddev=0.02)(rngs.params(), (seqlen, model_features))
-        )
+        self.pool = lambda x: nnx.avg_pool(x, (2, 2), (2, 2))
 
-        self.register_tokens = nnx.Param(jnp.zeros((num_register_tokens, model_features)))
+        self.cnn2 = nnx.Sequential(*[build_cnn_layer() for _ in range(after_pool_conv_count)])
 
-        self.init_hyper_connection = HyperConnectionInit(num_split=num_split)
-        self.encoders = nnx.List([
-            HyperConnectionTransformerBlock(
-                num_split, model_features, num_heads, encoder_dropout_rate, rngs=rngs
-            )
-            for _ in range(num_encoder)
-        ])
-        self.end_hyper_connection = HyperConnectionEnd()
+        self.squeeze_channel = nnx.Conv(model_features, 2, (1, 1), rngs=rngs)
 
-        self.features_weights = nnx.Param(jnp.full((seqlen, model_features), 1 / model_features))
-        self.features_weights_norm = nnx.LayerNorm(model_features, rngs=rngs)
+        self.final_mlp = MLP(2 * 16 * 16, 10, [2 * 16 * 16], nnx.leaky_relu, rngs=rngs)
 
-        self.target_logits_mlp = nnx.Sequential(
-            nnx.Dropout(pre_mlp_dropout_rate, rngs=rngs),
-            MLP(model_features, 10, [model_features * 4], nnx.gelu, rngs=rngs),
-        )
+    def __call__(self, x):
+        x = self.expand_channel(x)
 
-        self.model_features = model_features
-
-    def __call__(self, x: jax.Array):
+        x = (x, x)
         x = self.cnn(x)
-        batch_size, input_seq_len, _ = x.shape
-        x += self.pos_embedding[:input_seq_len][None, ...]
+        x = (self.pool(x[0]), self.pool(x[1]))
+        x = self.cnn2(x)
+        x = (x[0] + x[1]) / 2
 
-        x = jnp.concatenate(
-            [
-                x,
-                jnp.full((batch_size, *self.register_tokens.shape), self.register_tokens[...]),
-            ],
-            axis=1,
-        )
+        x = self.squeeze_channel(x)
+        x = x.reshape(x.shape[0], -1)
 
-        x = self.init_hyper_connection(x)
-        for encoder in self.encoders:
-            x = encoder(x)
-        x = self.end_hyper_connection(x)
-
-        x = x[:, :input_seq_len, :]
-
-        w = jax.nn.squareplus(self.features_weights[...])
-        x = jnp.sum(x * w[None, ...], axis=1) / jnp.sum(w, axis=0)[None, ...]
-        x = self.features_weights_norm(x)
-
-        return self.target_logits_mlp(x)
+        return self.final_mlp(x)

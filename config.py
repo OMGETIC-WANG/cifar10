@@ -10,17 +10,11 @@ def get_config():
     config.use_training_model = False
     config.train_state_path = "./cache/latest.trainstate"
 
-    config.model_features = 128
-    config.num_heads = 2
-    config.num_encoders = 8
-    config.num_split = 2
-    config.num_register_tokens = 16
-
-    config.cnn_first_dropout_rate = 0.1
-    config.cnn_second_dropout_rate = 0.1
-    config.cnn_final_dropout_rate = 0.1
-    config.encoder_dropout_rate = 0.2
-    config.pre_mlp_dropout_rate = 0.2
+    config.model_features = 64
+    config.num_before_pool_conv = 4
+    config.num_after_pool_conv = 8
+    config.expand_channel_droprate = 0.1
+    config.cnn_conv_droprate = 0.1
 
     config.train_batch_size = 40
     config.epoch_count = 200
@@ -44,7 +38,6 @@ def get_config():
     config.salt_noise_prob = 0.01
     config.flip_prob = 0.5
     config.mixup_weight = 0.2
-    config.transmix_weight = 0.2
     config.max_crop_width = 4
     config.max_crop_height = 4
     config.max_scale_size = 38

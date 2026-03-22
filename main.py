@@ -248,31 +248,17 @@ def main(_):
         if config.use_training_model:
             model, optimizer = model_serialization.LoadTrainingState(
                 config.train_state_path,
-                lambda: CIFAR10Model(
-                    config.model_features,
-                    config.num_heads,
-                    config.num_encoders,
-                    (config.train_batch_size, 32, 32, 3),
-                    rngs=nnx.Rngs(0),
-                ),
-                lambda model: nnx.Optimizer(
-                    model, optax.adamw(config.learning_rate), wrt=nnx.Param
-                ),
+                lambda: CIFAR10Model(model_features=config.model_features, rngs=rngs),
+                lambda model: nnx.Optimizer(model, optax.adamw(0.001), wrt=nnx.Param),
             )
         else:
             model = CIFAR10Model(
-                config.model_features,
-                config.num_heads,
-                config.num_encoders,
-                (config.train_batch_size, 32, 32, 3),
+                model_features=config.model_features,
+                before_pool_conv_count=config.num_before_pool_conv,
+                after_pool_conv_count=config.num_after_pool_conv,
+                expand_channel_droprate=config.expand_channel_droprate,
+                cnn_conv_droprate=config.cnn_conv_droprate,
                 rngs=rngs,
-                num_split=config.num_split,
-                cnn_first_dropout_rate=config.cnn_first_dropout_rate,
-                cnn_second_dropout_rate=config.cnn_second_dropout_rate,
-                cnn_final_dropout_rate=config.cnn_final_dropout_rate,
-                encoder_dropout_rate=config.encoder_dropout_rate,
-                pre_mlp_dropout_rate=config.pre_mlp_dropout_rate,
-                num_register_tokens=config.num_register_tokens,
             )
 
             total_steps = config.epoch_count * (trainset_size // config.train_batch_size)
@@ -328,13 +314,7 @@ def main(_):
         model = model_serialization.LoadNewestModel(
             config.model_save_dir,
             config.model_suffix,
-            lambda: CIFAR10Model(
-                config.model_features,
-                config.num_heads,
-                config.num_encoders,
-                (config.test_batch_size, 32, 32, 3),
-                rngs=rngs,
-            ),
+            lambda: CIFAR10Model(model_features=config.model_features, rngs=rngs),
         )
 
     print("Start testing")
