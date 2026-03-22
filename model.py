@@ -87,7 +87,7 @@ class SEConv(nnx.Module):
                 MLP(
                     scale_mlp_features,
                     scale_mlp_features,
-                    [scale_mlp_features * 2],
+                    [scale_mlp_features // 2],
                     nnx.leaky_relu,
                     rngs=rngs,
                 ),
@@ -102,57 +102,97 @@ class SEConv(nnx.Module):
         return y * scale[:, None, None, :]
 
 
+class SeperableConv(nnx.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        kernel_size: T.Sequence[int] | int,
+        rngs: nnx.Rngs,
+    ):
+        self.depthwise = nnx.vmap(lambda r: nnx.Conv(1, 1, kernel_size, rngs=nnx.Rngs(r)))(
+            jax.random.split(rngs.params(), in_features)
+        )
+        self.pointwise = nnx.Conv(in_features, out_features, (1, 1), rngs=rngs)
+
+    def __call__(self, x: jax.Array):
+        x = nnx.vmap(lambda m, x: m(x), in_axes=(0, 0))(
+            self.depthwise, x.transpose(3, 0, 1, 2)[..., None]
+        )  # in_features, B, H, W, 1
+        x = x.reshape(x.shape[:-1])  # in_features, B, H, W
+        x = x.transpose(1, 2, 3, 0)  # B, H, W, in_features
+        x = self.pointwise(x)  # B, H, W, out_features
+        return x
+
+
+class DCConvDownsample(nnx.Module):
+    def __init__(self, features: int, rngs: nnx.Rngs):
+        self.conv = nnx.Conv(features, features * 2, (2, 2), strides=(2, 2), rngs=rngs)
+
+    def __call__(self, x1: jax.Array, x2: jax.Array):
+        return self.conv(x1), self.conv(x2)
+
+
 class CIFAR10Model(nnx.Module):
     def __init__(
         self,
         *,
-        model_features: int,
-        before_pool_conv_count: int = 4,
-        after_pool_conv_count: int = 8,
+        num_32chan_conv: int = 4,
+        num_64chan_conv: int = 4,
+        num_128chan_conv: int = 4,
+        num_256chan_conv: int = 4,
         rngs: nnx.Rngs,
         expand_channel_droprate: float = 0.1,
         cnn_conv_droprate: float = 0.1,
     ):
         self.expand_channel = nnx.Sequential(
-            nnx.Conv(3, model_features, (3, 3), rngs=rngs),
+            nnx.Conv(3, 32, (3, 3), rngs=rngs),
             nnx.leaky_relu,
-            nnx.LayerNorm(model_features, rngs=rngs),
+            nnx.LayerNorm(32, rngs=rngs),
             nnx.Dropout(expand_channel_droprate, broadcast_dims=(1, 2), rngs=rngs),
         )
 
-        build_cnn_layer = lambda: DoubleConnectionShortcut(
+        build_cnn_layer = lambda features: DoubleConnectionShortcut(
             SEConv(
                 nnx.Sequential(
-                    nnx.Conv(model_features, model_features, (3, 3), rngs=rngs),
+                    SeperableConv(features, features, (3, 3), rngs=rngs),
                     nnx.leaky_relu,
-                    nnx.LayerNorm(model_features, rngs=rngs),
+                    nnx.LayerNorm(features, rngs=rngs),
                 ),
-                scale_mlp_features=model_features,
+                scale_mlp_features=features,
                 rngs=rngs,
             ),
             nnx.Dropout(cnn_conv_droprate, broadcast_dims=(1, 2), rngs=rngs),
             rngs=rngs,
         )
-        self.cnn = nnx.Sequential(*[build_cnn_layer() for _ in range(before_pool_conv_count)])
+        build_cnn = lambda features, count: nnx.Sequential(*[
+            build_cnn_layer(features) for _ in range(count)
+        ])
 
-        self.pool = lambda x: nnx.avg_pool(x, (2, 2), (2, 2))
+        dc_avg_pool = lambda x1, x2: (
+            nnx.avg_pool(x1, (2, 2), (2, 2)),
+            nnx.avg_pool(x2, (2, 2), (2, 2)),
+        )
 
-        self.cnn2 = nnx.Sequential(*[build_cnn_layer() for _ in range(after_pool_conv_count)])
+        self.cnn = nnx.Sequential(
+            build_cnn(32, num_32chan_conv),
+            DCConvDownsample(32, rngs=rngs),
+            build_cnn(64, num_64chan_conv),
+            DCConvDownsample(64, rngs=rngs),
+            build_cnn(128, num_128chan_conv),
+            DCConvDownsample(128, rngs=rngs),
+            build_cnn(256, num_256chan_conv),
+            dc_avg_pool,
+        )
 
-        self.squeeze_channel = nnx.Conv(model_features, 2, (1, 1), rngs=rngs)
-
-        self.final_mlp = MLP(2 * 16 * 16, 10, [2 * 16 * 16], nnx.leaky_relu, rngs=rngs)
+        self.final_mlp = MLP(256, 10, [256 * 4], nnx.leaky_relu, rngs=rngs)
 
     def __call__(self, x):
         x = self.expand_channel(x)
 
         x = (x, x)
         x = self.cnn(x)
-        x = (self.pool(x[0]), self.pool(x[1]))
-        x = self.cnn2(x)
         x = (x[0] + x[1]) / 2
-
-        x = self.squeeze_channel(x)
-        x = x.reshape(x.shape[0], -1)
+        x = jnp.mean(x, axis=(1, 2))
 
         return self.final_mlp(x)

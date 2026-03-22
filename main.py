@@ -248,15 +248,16 @@ def main(_):
         if config.use_training_model:
             model, optimizer = model_serialization.LoadTrainingState(
                 config.train_state_path,
-                lambda: CIFAR10Model(model_features=config.model_features, rngs=rngs),
+                lambda: CIFAR10Model(rngs=rngs),
                 lambda model: nnx.Optimizer(model, optax.adamw(0.001), wrt=nnx.Param),
             )
         else:
             model = CIFAR10Model(
-                model_features=config.model_features,
-                before_pool_conv_count=config.num_before_pool_conv,
-                after_pool_conv_count=config.num_after_pool_conv,
                 expand_channel_droprate=config.expand_channel_droprate,
+                num_32chan_conv=config.num_32chan_conv,
+                num_64chan_conv=config.num_64chan_conv,
+                num_128chan_conv=config.num_128chan_conv,
+                num_256chan_conv=config.num_256chan_conv,
                 cnn_conv_droprate=config.cnn_conv_droprate,
                 rngs=rngs,
             )
@@ -314,7 +315,7 @@ def main(_):
         model = model_serialization.LoadNewestModel(
             config.model_save_dir,
             config.model_suffix,
-            lambda: CIFAR10Model(model_features=config.model_features, rngs=rngs),
+            lambda: CIFAR10Model(rngs=rngs),
         )
 
     print("Start testing")

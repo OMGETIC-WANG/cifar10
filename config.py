@@ -10,9 +10,10 @@ def get_config():
     config.use_training_model = False
     config.train_state_path = "./cache/latest.trainstate"
 
-    config.model_features = 64
-    config.num_before_pool_conv = 4
-    config.num_after_pool_conv = 8
+    config.num_32chan_conv = 4
+    config.num_64chan_conv = 4
+    config.num_128chan_conv = 4
+    config.num_256chan_conv = 4
     config.expand_channel_droprate = 0.1
     config.cnn_conv_droprate = 0.1
 
