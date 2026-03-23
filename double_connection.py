@@ -33,7 +33,7 @@ class DoubleConnectionShortcut(nnx.Module):
         else:
             self.gen_residual_weight = residual_weight_gen
 
-    def _Call(self, x1: jax.Array, x2: jax.Array):
+    def __call__(self, x1: jax.Array, x2: jax.Array):
         pre_input_weight = self.gen_pre_input_weight(x1, x2)
         post_layer_weight = self.gen_post_layer_weight(x1, x2)
         residual_weight = self.gen_residual_weight(x1, x2)
@@ -49,22 +49,3 @@ class DoubleConnectionShortcut(nnx.Module):
         res2 = x1 * residual_weight[1, 0] + x2 * residual_weight[1, 1]
 
         return m_out1 + res1, m_out2 + res2
-
-    @overload
-    def __call__(self, inputs: T.Tuple[jax.Array, jax.Array]) -> tuple[jax.Array, jax.Array]: ...
-
-    @overload
-    def __call__(self, x1: jax.Array, x2: jax.Array) -> tuple[jax.Array, jax.Array]: ...
-
-    def __call__(self, *args: T.Any, **kwargs: T.Any) -> T.Tuple[jax.Array, jax.Array]:
-        if kwargs:
-            if "inputs" in kwargs:
-                x1, x2 = kwargs["inputs"]
-            else:
-                x1, x2 = kwargs["x1"], kwargs["x2"]
-        elif len(args) == 1:
-            x1, x2 = args[0]
-        else:
-            x1, x2 = args
-
-        return self._Call(x1, x2)
