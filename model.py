@@ -36,7 +36,6 @@ class MultiKernelConv(nnx.Module):
         kernel_sizes: T.Sequence[int | T.Sequence[int]],
         *args,
         rngs: nnx.Rngs,
-        use_shortcut: bool = False,
         **kwargs,
     ):
         assert out_features % len(kernel_sizes) == 0
@@ -53,15 +52,9 @@ class MultiKernelConv(nnx.Module):
             )
             for kernel_size in kernel_sizes
         ])
-        self.use_shortcut = use_shortcut
-        if use_shortcut:
-            assert in_features == out_features
 
     def __call__(self, x: jax.Array):
-        y = jnp.concatenate([conv(x) for conv in self.convs], axis=-1)
-        if self.use_shortcut:
-            y += x
-        return y
+        return jnp.concatenate([conv(x) for conv in self.convs], axis=-1)
 
 
 class SEConv(nnx.Module):
@@ -79,10 +72,6 @@ class SEConv(nnx.Module):
             )
             assert rngs is not None, "Default init scale_mlp requires rngs"
 
-            def sigmoid_avg(x: jax.Array):
-                x = nnx.sigmoid(x)
-                return x / (jnp.sum(x, axis=-1, keepdims=True) + 1e-8)
-
             self.scale_mlp = nnx.Sequential(
                 MLP(
                     scale_mlp_features,
@@ -91,7 +80,7 @@ class SEConv(nnx.Module):
                     nnx.leaky_relu,
                     rngs=rngs,
                 ),
-                sigmoid_avg,
+                nnx.sigmoid,
             )
         else:
             self.scale_mlp = scale_mlp
