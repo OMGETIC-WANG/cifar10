@@ -192,8 +192,7 @@ class CIFAR10Model(nnx.Module):
     def __call__(self, x):
         x = self.expand_channel(x)
 
-        x = (x, x)
-        x = self.cnn(x)
+        x = self.cnn(x, x)
         x = (x[0] + x[1]) / 2
         x = jnp.mean(x, axis=(1, 2))
 
