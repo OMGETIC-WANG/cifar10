@@ -19,17 +19,17 @@ class DoubleConnectionShortcut(nnx.Module):
         self.module = nnx.Sequential(*layers)
 
         if pre_input_weight_gen is None:
-            self.gen_pre_input_weight = _ParamReturner(rngs.normal((self.num_split,)))
+            self.gen_pre_input_weight = _ParamReturner(jnp.array([]))
         else:
             self.gen_pre_input_weight = pre_input_weight_gen
 
         if post_layer_weight_gen is None:
-            self.gen_post_layer_weight = _ParamReturner(rngs.normal((self.num_split,)))
+            self.gen_post_layer_weight = _ParamReturner(jnp.array([]))
         else:
             self.gen_post_layer_weight = post_layer_weight_gen
 
         if residual_weight_gen is None:
-            self.gen_residual_weight = _ParamReturner(rngs.normal((self.num_split, self.num_split)))
+            self.gen_residual_weight = _ParamReturner(jnp.array([]))
         else:
             self.gen_residual_weight = residual_weight_gen
 
@@ -49,3 +49,32 @@ class DoubleConnectionShortcut(nnx.Module):
         res2 = x1 * residual_weight[1, 0] + x2 * residual_weight[1, 1]
 
         return m_out1 + res1, m_out2 + res2
+
+
+def _InitDoubleConnectionShortcutWeights_impl(
+    layers: T.Iterable[DoubleConnectionShortcut | T.Any], i: int
+):
+    for layer in layers:
+        if isinstance(layer, DoubleConnectionShortcut):
+            assert isinstance(layer.gen_pre_input_weight, _ParamReturner)
+            assert isinstance(layer.gen_post_layer_weight, _ParamReturner)
+            assert isinstance(layer.gen_residual_weight, _ParamReturner)
+            if i % 2 == 0:
+                layer.gen_pre_input_weight = _ParamReturner(jnp.array([1.0, 1.0]))
+                layer.gen_post_layer_weight = _ParamReturner(jnp.array([1.0, 0.0]))
+                layer.gen_residual_weight = _ParamReturner(jnp.array([[1.0, 1.0], [1.0, 1.0]]))
+            else:
+                layer.gen_pre_input_weight = _ParamReturner(jnp.array([0.0, 1.0]))
+                layer.gen_post_layer_weight = _ParamReturner(jnp.array([0.0, 1.0]))
+                layer.gen_residual_weight = _ParamReturner(jnp.array([[1.0, 0.0], [0.0, 1.0]]))
+            i += 1
+        else:
+            if isinstance(layer, nnx.Sequential):
+                i = _InitDoubleConnectionShortcutWeights_impl(layer.layers, i)
+            elif isinstance(layer, T.Iterable) and not isinstance(layer, (str, bytes)):
+                i = _InitDoubleConnectionShortcutWeights_impl(layer, i)
+    return i
+
+
+def InitDoubleConnectionShortcutWeights(layers: T.Iterable[DoubleConnectionShortcut | T.Any]):
+    _InitDoubleConnectionShortcutWeights_impl(layers, 0)

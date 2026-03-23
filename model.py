@@ -4,7 +4,7 @@ import numpy as np
 import flax
 import flax.nnx as nnx
 import typing as T
-from double_connection import DoubleConnectionShortcut
+from double_connection import DoubleConnectionShortcut, InitDoubleConnectionShortcutWeights
 
 
 class MLP(nnx.Module):
@@ -187,6 +187,8 @@ class CIFAR10Model(nnx.Module):
             build_cnn(SeperableConv, 256, num_256chan_conv),
             dc_avg_pool,
         )
+
+        InitDoubleConnectionShortcutWeights(self.cnn.layers)
 
         self.final_mlp = MLP(256, 10, [256 * 4], nnx.leaky_relu, rngs=rngs)
 
