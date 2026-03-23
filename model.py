@@ -99,18 +99,14 @@ class SeperableConv(nnx.Module):
         kernel_size: T.Sequence[int] | int,
         rngs: nnx.Rngs,
     ):
-        self.depthwise = nnx.vmap(lambda r: nnx.Conv(1, 1, kernel_size, rngs=nnx.Rngs(r)))(
-            jax.random.split(rngs.params(), in_features)
+        self.depthwise = nnx.Conv(
+            in_features, in_features, kernel_size, feature_group_count=in_features, rngs=rngs
         )
         self.pointwise = nnx.Conv(in_features, out_features, (1, 1), rngs=rngs)
 
     def __call__(self, x: jax.Array):
-        x = nnx.vmap(lambda m, x: m(x), in_axes=(0, 0))(
-            self.depthwise, x.transpose(3, 0, 1, 2)[..., None]
-        )  # in_features, B, H, W, 1
-        x = x.reshape(x.shape[:-1])  # in_features, B, H, W
-        x = x.transpose(1, 2, 3, 0)  # B, H, W, in_features
-        x = self.pointwise(x)  # B, H, W, out_features
+        x = self.depthwise(x)
+        x = self.pointwise(x)
         return x
 
 
