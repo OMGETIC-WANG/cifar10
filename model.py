@@ -152,21 +152,23 @@ class CIFAR10Model(nnx.Module):
             nnx.Dropout(expand_channel_droprate, broadcast_dims=(1, 2), rngs=rngs),
         )
 
-        build_cnn_layer = lambda features: DoubleConnectionShortcut(
-            SEConv(
-                nnx.Sequential(
-                    SeperableConv(features, features, (3, 3), rngs=rngs),
-                    nnx.leaky_relu,
-                    nnx.LayerNorm(features, rngs=rngs),
+        def build_cnn_layer(conv_type: type, features: int):
+            return DoubleConnectionShortcut(
+                SEConv(
+                    nnx.Sequential(
+                        conv_type(features, features, (3, 3), rngs=rngs),
+                        nnx.leaky_relu,
+                        nnx.LayerNorm(features, rngs=rngs),
+                    ),
+                    scale_mlp_features=features,
+                    rngs=rngs,
                 ),
-                scale_mlp_features=features,
+                nnx.Dropout(cnn_conv_droprate, broadcast_dims=(1, 2), rngs=rngs),
                 rngs=rngs,
-            ),
-            nnx.Dropout(cnn_conv_droprate, broadcast_dims=(1, 2), rngs=rngs),
-            rngs=rngs,
-        )
-        build_cnn = lambda features, count: nnx.Sequential(*[
-            build_cnn_layer(features) for _ in range(count)
+            )
+
+        build_cnn = lambda conv_type, features, count: nnx.Sequential(*[
+            build_cnn_layer(conv_type, features) for _ in range(count)
         ])
 
         dc_avg_pool = lambda x1, x2: (
@@ -175,13 +177,13 @@ class CIFAR10Model(nnx.Module):
         )
 
         self.cnn = nnx.Sequential(
-            build_cnn(32, num_32chan_conv),
+            build_cnn(nnx.Conv, 32, num_32chan_conv),
             DCConvDownsample(32, rngs=rngs),
-            build_cnn(64, num_64chan_conv),
+            build_cnn(nnx.Conv, 64, num_64chan_conv),
             DCConvDownsample(64, rngs=rngs),
-            build_cnn(128, num_128chan_conv),
+            build_cnn(SeperableConv, 128, num_128chan_conv),
             DCConvDownsample(128, rngs=rngs),
-            build_cnn(256, num_256chan_conv),
+            build_cnn(SeperableConv, 256, num_256chan_conv),
             dc_avg_pool,
         )
 
