@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 import flax
 import flax.nnx as nnx
 import typing as T
@@ -28,33 +29,47 @@ class MLP(nnx.Module):
         return self.layers[-1](x)
 
 
-class MultiKernelConv(nnx.Module):
+class MultiKernelConv2D(nnx.Module):
     def __init__(
         self,
         in_features: int,
         out_features: int,
-        kernel_sizes: T.Sequence[int | T.Sequence[int]],
-        *args,
+        kernel_sizes: T.Sequence[T.Sequence[int]],
+        *,
         rngs: nnx.Rngs,
-        **kwargs,
     ):
         assert out_features % len(kernel_sizes) == 0
 
-        self.convs = nnx.List([
-            nnx.Conv(
-                in_features,
-                out_features // len(kernel_sizes),
-                kernel_size,
-                padding="SAME",
-                rngs=rngs,
-                *args,
-                **kwargs,
-            )
-            for kernel_size in kernel_sizes
-        ])
+        merged_kernel_sizes = {}
+        for ks in kernel_sizes:
+            if ks in merged_kernel_sizes:
+                merged_kernel_sizes[ks] += 1
+            else:
+                merged_kernel_sizes[ks] = 1
+        for ks in kernel_sizes:
+            merged_kernel_sizes[ks] *= out_features // len(kernel_sizes)
 
-    def __call__(self, x: jax.Array):
-        return jnp.concatenate([conv(x) for conv in self.convs], axis=-1)
+        max_kernel_size = (
+            max(kernel_sizes, key=lambda x: x[0])[0],
+            max(kernel_sizes, key=lambda x: x[1])[1],
+        )
+        self.conv = nnx.Conv(in_features, out_features, max_kernel_size, rngs=rngs)
+
+        mask = np.zeros((*max_kernel_size, 1, out_features))
+        i = 0
+        for kernel_size, count in merged_kernel_sizes.items():
+            hpad = (max_kernel_size[0] - kernel_size[0]) // 2
+            wpad = (max_kernel_size[1] - kernel_size[1]) // 2
+            mask[hpad : hpad + kernel_size[0], wpad : wpad + kernel_size[1], :, i : i + count] = 1
+            i += count
+        self.mask = jnp.array(mask)
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        original_kernel = self.conv.kernel[...]
+        self.conv.kernel[...] *= self.mask
+        out = self.conv(x)
+        self.conv.kernel[...] = original_kernel
+        return out
 
 
 class SEConv(nnx.Module):
@@ -131,17 +146,17 @@ class CIFAR10Model(nnx.Module):
         cnn_conv_droprate: float = 0.1,
     ):
         self.expand_channel = nnx.Sequential(
-            nnx.Conv(3, 32, (3, 3), rngs=rngs),
+            MultiKernelConv2D(3, 32, [(3, 3), (5, 5)], rngs=rngs),
             nnx.leaky_relu,
             nnx.LayerNorm(32, rngs=rngs),
             nnx.Dropout(expand_channel_droprate, broadcast_dims=(1, 2), rngs=rngs),
         )
 
-        def build_cnn_layer(conv_type: type, features: int):
+        def build_cnn_layer(conv_type: type, features: int, kernel_shape=(3, 3)):
             return DoubleConnectionShortcut(
                 SEConv(
                     nnx.Sequential(
-                        conv_type(features, features, (3, 3), rngs=rngs),
+                        conv_type(features, features, kernel_shape, rngs=rngs),
                         nnx.leaky_relu,
                         nnx.LayerNorm(features, rngs=rngs),
                     ),
@@ -152,9 +167,10 @@ class CIFAR10Model(nnx.Module):
                 rngs=rngs,
             )
 
-        build_cnn = lambda conv_type, features, count: nnx.Sequential(*[
-            build_cnn_layer(conv_type, features) for _ in range(count)
-        ])
+        def build_cnn(conv_type, features, count, kernel_shape=(3, 3)):
+            return nnx.Sequential(*[
+                build_cnn_layer(conv_type, features, kernel_shape) for _ in range(count)
+            ])
 
         dc_avg_pool = lambda x1, x2: (
             nnx.avg_pool(x1, (2, 2), (2, 2)),
@@ -162,7 +178,7 @@ class CIFAR10Model(nnx.Module):
         )
 
         self.cnn = nnx.Sequential(
-            build_cnn(nnx.Conv, 32, num_32chan_conv),
+            build_cnn(MultiKernelConv2D, 32, num_32chan_conv, [(3, 3), (5, 5)]),
             DCConvDownsample(32, rngs=rngs),
             build_cnn(nnx.Conv, 64, num_64chan_conv),
             DCConvDownsample(64, rngs=rngs),
