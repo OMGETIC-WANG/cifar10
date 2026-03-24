@@ -92,7 +92,7 @@ class SEConv(nnx.Module):
                     scale_mlp_features,
                     scale_mlp_features,
                     [scale_mlp_features // 8],
-                    nnx.leaky_relu,
+                    nnx.relu,
                     rngs=rngs,
                 ),
                 nnx.sigmoid,
@@ -147,7 +147,7 @@ class CIFAR10Model(nnx.Module):
     ):
         self.expand_channel = nnx.Sequential(
             MultiKernelConv2D(3, 32, [(3, 3), (5, 5)], rngs=rngs),
-            nnx.leaky_relu,
+            nnx.relu,
             nnx.LayerNorm(32, rngs=rngs),
             nnx.Dropout(expand_channel_droprate, broadcast_dims=(1, 2), rngs=rngs),
         )
@@ -157,7 +157,7 @@ class CIFAR10Model(nnx.Module):
                 SEConv(
                     nnx.Sequential(
                         conv_type(features, features, kernel_shape, rngs=rngs),
-                        nnx.leaky_relu,
+                        nnx.relu,
                         nnx.LayerNorm(features, rngs=rngs),
                     ),
                     scale_mlp_features=features,
@@ -190,7 +190,7 @@ class CIFAR10Model(nnx.Module):
 
         InitDoubleConnectionShortcutWeights(self.cnn.layers)
 
-        self.final_mlp = MLP(256, 10, [256 * 4], nnx.leaky_relu, rngs=rngs)
+        self.final_mlp = MLP(256, 10, [256 * 4], nnx.gelu, rngs=rngs)
 
     def __call__(self, x):
         x = self.expand_channel(x)
