@@ -91,7 +91,7 @@ class SEConv(nnx.Module):
                 MLP(
                     scale_mlp_features,
                     scale_mlp_features,
-                    [scale_mlp_features // 2],
+                    [scale_mlp_features // 8],
                     nnx.leaky_relu,
                     rngs=rngs,
                 ),
