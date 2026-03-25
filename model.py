@@ -182,9 +182,9 @@ class CIFAR10Model(nnx.Module):
             DCConvDownsample(32, rngs=rngs),
             build_cnn(nnx.Conv, 64, num_64chan_conv),
             DCConvDownsample(64, rngs=rngs),
-            build_cnn(SeperableConv, 128, num_128chan_conv),
+            build_cnn(nnx.Conv, 128, num_128chan_conv),
             DCConvDownsample(128, rngs=rngs),
-            build_cnn(SeperableConv, 256, num_256chan_conv),
+            build_cnn(nnx.Conv, 256, num_256chan_conv),
             dc_avg_pool,
         )
 
